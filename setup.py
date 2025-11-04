@@ -1,4 +1,4 @@
-"""Setup script for airborne-gimbal package with Cython support."""
+"""Setup script for cymbal package with Cython support."""
 
 from setuptools import setup, find_packages, Extension
 from Cython.Build import cythonize
@@ -15,35 +15,35 @@ requirements.append("Cython>=0.29.0")
 # Define Cython extensions
 extensions = [
     Extension(
-        "airborne_gimbal.camera_gimbal.storm32_controller",
-        ["airborne_gimbal/camera_gimbal/storm32_controller.pyx"],
+        "cymbal.camera_gimbal.storm32_controller",
+        ["cymbal/camera_gimbal/storm32_controller.pyx"],
     ),
     Extension(
-        "airborne_gimbal.sensors.mpu6050",
-        ["airborne_gimbal/sensors/mpu6050.pyx"],
+        "cymbal.sensors.mpu6050",
+        ["cymbal/sensors/mpu6050.pyx"],
     ),
     Extension(
-        "airborne_gimbal.spotlight_gimbal.servo_controller",
-        ["airborne_gimbal/spotlight_gimbal/servo_controller.pyx"],
+        "cymbal.spotlight_gimbal.servo_controller",
+        ["cymbal/spotlight_gimbal/servo_controller.pyx"],
     ),
     Extension(
-        "airborne_gimbal.utils.config",
-        ["airborne_gimbal/utils/config.pyx"],
+        "cymbal.utils.config",
+        ["cymbal/utils/config.pyx"],
     ),
     Extension(
-        "airborne_gimbal.main",
-        ["airborne_gimbal/main.pyx"],
+        "cymbal.main",
+        ["cymbal/main.pyx"],
     ),
 ]
 
 setup(
-    name="airborne-gimbal",
+    name="cymbal",
     version="0.1.0",
     author="gtraines",
     description="Control software for dual gimbals on fixed-wing drones (Cython optimized)",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/gtraines/airborne-gimbal",
+    url="https://github.com/gtraines/cymbal",
     packages=find_packages(),
     ext_modules=cythonize(
         extensions,
@@ -73,7 +73,7 @@ setup(
     setup_requires=['Cython>=0.29.0'],
     entry_points={
         "console_scripts": [
-            "airborne-gimbal=airborne_gimbal.main:main",
+            "cymbal=cymbal.main:main",
         ],
     },
 )

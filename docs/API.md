@@ -495,11 +495,11 @@ with MPU6050() as mpu:
 ## Complete Example
 
 ```python
-from airborne_gimbal.utils.config import SystemConfig
-from airborne_gimbal.main import GimbalController
+from cymbal.utils.config import SystemConfig
+from cymbal.main import GimbalController
 
 # Load configuration
-config = SystemConfig.load('/etc/airborne_gimbal/config.json')
+config = SystemConfig.load('/etc/cymbal/config.json')
 
 # Create controller
 controller = GimbalController(config)
@@ -569,7 +569,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 # Or configure for specific modules
-logging.getLogger('airborne_gimbal.camera_gimbal').setLevel(logging.DEBUG)
+logging.getLogger('cymbal.camera_gimbal').setLevel(logging.DEBUG)
 ```
 
 ## Performance Considerations

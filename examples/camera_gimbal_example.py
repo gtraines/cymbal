@@ -7,7 +7,7 @@ This script demonstrates basic control of the Storm32bgc camera gimbal.
 
 import time
 import sys
-from airborne_gimbal.camera_gimbal import Storm32Controller
+from cymbal.camera_gimbal import Storm32Controller
 
 
 def main():

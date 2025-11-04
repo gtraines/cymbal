@@ -1,6 +1,6 @@
 # Configuration Guide
 
-The system uses a JSON configuration file located at `/etc/airborne_gimbal/config.json` or in the project root as `config.json`.
+The system uses a JSON configuration file located at `/etc/cymbal/config.json` or in the project root as `config.json`.
 
 ## Configuration Parameters
 
@@ -124,9 +124,9 @@ Common GPIO pins for servo control:
 
 ### From Default Location
 ```python
-from airborne_gimbal.utils.config import SystemConfig
+from cymbal.utils.config import SystemConfig
 
-config = SystemConfig.load('/etc/airborne_gimbal/config.json')
+config = SystemConfig.load('/etc/cymbal/config.json')
 ```
 
 ### From Custom Location
@@ -143,7 +143,7 @@ config = SystemConfig.load('nonexistent.json')
 ## Saving Configuration
 
 ```python
-from airborne_gimbal.utils.config import SystemConfig, CameraGimbalConfig, SpotlightGimbalConfig
+from cymbal.utils.config import SystemConfig, CameraGimbalConfig, SpotlightGimbalConfig
 
 # Create configuration
 camera = CameraGimbalConfig(serial_port="/dev/ttyAMA0", baudrate=115200)

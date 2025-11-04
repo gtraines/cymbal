@@ -74,7 +74,7 @@ venv.bak/
 /var/log/
 
 # Configuration (keep example configs)
-/etc/airborne_gimbal/config.json
+/etc/cymbal/config.json
 
 # Temporary files
 /tmp/

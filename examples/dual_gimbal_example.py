@@ -7,8 +7,8 @@ This script demonstrates coordinated control of camera and spotlight gimbals.
 
 import time
 import sys
-from airborne_gimbal.utils.config import SystemConfig
-from airborne_gimbal.main import GimbalController
+from cymbal.utils.config import SystemConfig
+from cymbal.main import GimbalController
 
 
 def main():

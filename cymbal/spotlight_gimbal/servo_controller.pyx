@@ -8,8 +8,8 @@ with MPU6050 IMU for stabilization.
 import time
 import logging
 from typing import Optional, Tuple
-from airborne_gimbal.sensors.mpu6050 cimport MPU6050
-from airborne_gimbal.sensors.mpu6050 import MPU6050
+from cymbal.sensors.mpu6050 cimport MPU6050
+from cymbal.sensors.mpu6050 import MPU6050
 
 try:
     import pigpio

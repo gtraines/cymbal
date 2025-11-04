@@ -90,8 +90,8 @@ sudo reboot
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/gtraines/airborne-gimbal.git
-cd airborne-gimbal
+git clone https://github.com/gtraines/cymbal.git
+cd cymbal
 
 # Install dependencies (includes Cython)
 pip3 install -r requirements.txt
@@ -122,10 +122,10 @@ ls -l /dev/ttyAMA0
 The system uses a JSON configuration file. Copy the example configuration:
 
 ```bash
-cp config.json /etc/airborne_gimbal/config.json
+cp config.json /etc/cymbal/config.json
 ```
 
-Edit `/etc/airborne_gimbal/config.json` to match your hardware setup:
+Edit `/etc/cymbal/config.json` to match your hardware setup:
 
 ```json
 {
@@ -150,7 +150,7 @@ Edit `/etc/airborne_gimbal/config.json` to match your hardware setup:
 ### As a Python Package
 
 ```python
-from airborne_gimbal import Storm32Controller, SpotlightController
+from cymbal import Storm32Controller, SpotlightController
 
 # Camera gimbal control
 with Storm32Controller() as camera:
@@ -166,13 +166,13 @@ with SpotlightController() as spotlight:
 Run the main control application:
 
 ```bash
-python3 -m airborne_gimbal.main
+python3 -m cymbal.main
 ```
 
 Or as a standalone script:
 
 ```bash
-python3 airborne_gimbal/main.py
+python3 cymbal/main.py
 ```
 
 ### Example Scripts
@@ -195,7 +195,7 @@ python3 examples/dual_gimbal_example.py
 ### Storm32Controller (Camera Gimbal)
 
 ```python
-from airborne_gimbal.camera_gimbal import Storm32Controller
+from cymbal.camera_gimbal import Storm32Controller
 
 controller = Storm32Controller(port="/dev/ttyAMA0", baudrate=115200)
 controller.connect()
@@ -218,7 +218,7 @@ controller.disconnect()
 ### SpotlightController (Spotlight Gimbal)
 
 ```python
-from airborne_gimbal.spotlight_gimbal import SpotlightController
+from cymbal.spotlight_gimbal import SpotlightController
 
 controller = SpotlightController(pitch_pin=17, yaw_pin=27)
 controller.initialize()
@@ -247,8 +247,8 @@ controller.close()
 ### GimbalController (Main System)
 
 ```python
-from airborne_gimbal.utils.config import SystemConfig
-from airborne_gimbal.main import GimbalController
+from cymbal.utils.config import SystemConfig
+from cymbal.main import GimbalController
 
 config = SystemConfig.load('config.json')
 controller = GimbalController(config)
@@ -270,7 +270,7 @@ controller.shutdown()
 ## Architecture
 
 ```
-airborne_gimbal/
+cymbal/
 ├── camera_gimbal/
 │   └── storm32_controller.py    # Storm32bgc control
 ├── spotlight_gimbal/

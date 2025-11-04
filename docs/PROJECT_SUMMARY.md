@@ -41,7 +41,7 @@ Complete dual gimbal control system for fixed-wing drones, controlled via Raspbe
 ## Software Architecture
 
 ```
-airborne_gimbal/
+cymbal/
 ├── camera_gimbal/           # Storm32bgc controller
 │   └── storm32_controller.py
 ├── spotlight_gimbal/        # Servo controller
@@ -120,7 +120,7 @@ airborne_gimbal/
 
 ### Basic Camera Control
 ```python
-from airborne_gimbal import Storm32Controller
+from cymbal import Storm32Controller
 
 with Storm32Controller() as camera:
     camera.set_angle(pitch=30, roll=0, yaw=45)
@@ -128,7 +128,7 @@ with Storm32Controller() as camera:
 
 ### Basic Spotlight Control
 ```python
-from airborne_gimbal import SpotlightController
+from cymbal import SpotlightController
 
 with SpotlightController() as spotlight:
     spotlight.set_position(pitch=30, yaw=45)
@@ -137,8 +137,8 @@ with SpotlightController() as spotlight:
 
 ### Synchronized Control
 ```python
-from airborne_gimbal.utils.config import SystemConfig
-from airborne_gimbal.main import GimbalController
+from cymbal.utils.config import SystemConfig
+from cymbal.main import GimbalController
 
 config = SystemConfig.load('config.json')
 controller = GimbalController(config)
@@ -158,16 +158,16 @@ Basic test suite included:
 
 ### Installation
 ```bash
-git clone https://github.com/gtraines/airborne-gimbal.git
-cd airborne-gimbal
+git clone https://github.com/gtraines/cymbal.git
+cd cymbal
 pip3 install -r requirements.txt
 ```
 
 ### As System Service
 ```bash
-sudo cp airborne-gimbal.service /etc/systemd/system/
-sudo systemctl enable airborne-gimbal
-sudo systemctl start airborne-gimbal
+sudo cp cymbal.service /etc/systemd/system/
+sudo systemctl enable cymbal
+sudo systemctl start cymbal
 ```
 
 ## Performance Characteristics
@@ -203,7 +203,7 @@ See LICENSE file for details.
 ## Support
 
 For issues and questions:
-- GitHub Issues: https://github.com/gtraines/airborne-gimbal/issues
+- GitHub Issues: https://github.com/gtraines/cymbal/issues
 - Documentation: See docs/ directory
 - Examples: See examples/ directory
 

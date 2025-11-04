@@ -8,11 +8,11 @@ This project has been rewritten in Cython for improved performance and efficienc
 
 All core modules have been converted to Cython (`.pyx` files) with proper Cython syntax:
 
-- `airborne_gimbal/camera_gimbal/storm32_controller.pyx` - Storm32bgc camera gimbal controller (`cdef class`)
-- `airborne_gimbal/spotlight_gimbal/servo_controller.pyx` - Spotlight servo controller (`cdef class`)
-- `airborne_gimbal/sensors/mpu6050.pyx` - MPU6050 IMU interface (`cdef class`)
-- `airborne_gimbal/utils/config.pyx` - Configuration management (dataclasses)
-- `airborne_gimbal/main.pyx` - Main control application (`cdef class`)
+- `cymbal/camera_gimbal/storm32_controller.pyx` - Storm32bgc camera gimbal controller (`cdef class`)
+- `cymbal/spotlight_gimbal/servo_controller.pyx` - Spotlight servo controller (`cdef class`)
+- `cymbal/sensors/mpu6050.pyx` - MPU6050 IMU interface (`cdef class`)
+- `cymbal/utils/config.pyx` - Configuration management (dataclasses)
+- `cymbal/main.pyx` - Main control application (`cdef class`)
 
 ## Cython Features Used
 
@@ -127,7 +127,7 @@ To create and install a distributable wheel:
 
 ```bash
 python3 setup.py bdist_wheel
-pip3 install dist/airborne_gimbal-*.whl
+pip3 install dist/cymbal-*.whl
 ```
 
 ## Usage
@@ -135,7 +135,7 @@ pip3 install dist/airborne_gimbal-*.whl
 The Cython-compiled modules work exactly like the original Python modules:
 
 ```python
-from airborne_gimbal import Storm32Controller, SpotlightController, MPU6050
+from cymbal import Storm32Controller, SpotlightController, MPU6050
 
 # Use exactly as before
 with Storm32Controller() as camera:
@@ -171,7 +171,7 @@ The setup.py includes these Cython compiler directives for optimal performance:
 To generate annotated HTML showing Python/C interaction:
 
 ```bash
-cython -a airborne_gimbal/camera_gimbal/storm32_controller.pyx
+cython -a cymbal/camera_gimbal/storm32_controller.pyx
 # Open storm32_controller.html in a browser
 ```
 
@@ -240,7 +240,7 @@ sudo apt-get install build-essential
 
 **"ImportError: *.so: cannot open shared object file"**
 - Rebuild with: `python3 setup.py build_ext --inplace`
-- Check library dependencies with: `ldd airborne_gimbal/camera_gimbal/storm32_controller.*.so`
+- Check library dependencies with: `ldd cymbal/camera_gimbal/storm32_controller.*.so`
 
 ## Distribution
 

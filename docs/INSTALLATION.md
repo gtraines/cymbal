@@ -90,12 +90,12 @@ ls -l /dev/serial0
 
 ### 6. Install Python Package
 
-Clone and install the airborne-gimbal package:
+Clone and install the cymbal package:
 
 ```bash
 cd ~
-git clone https://github.com/gtraines/airborne-gimbal.git
-cd airborne-gimbal
+git clone https://github.com/gtraines/cymbal.git
+cd cymbal
 
 # Install in development mode
 pip3 install -e .
@@ -119,15 +119,15 @@ Log out and log back in for group changes to take effect.
 Create configuration directory:
 
 ```bash
-sudo mkdir -p /etc/airborne_gimbal
-sudo cp config.json /etc/airborne_gimbal/config.json
-sudo chown -R $USER:$USER /etc/airborne_gimbal
+sudo mkdir -p /etc/cymbal
+sudo cp config.json /etc/cymbal/config.json
+sudo chown -R $USER:$USER /etc/cymbal
 ```
 
 Edit configuration as needed:
 
 ```bash
-nano /etc/airborne_gimbal/config.json
+nano /etc/cymbal/config.json
 ```
 
 ### 9. Test Installation
@@ -135,7 +135,7 @@ nano /etc/airborne_gimbal/config.json
 Test basic imports:
 
 ```bash
-python3 -c "from airborne_gimbal import Storm32Controller, SpotlightController; print('Import successful!')"
+python3 -c "from cymbal import Storm32Controller, SpotlightController; print('Import successful!')"
 ```
 
 Run example scripts (with hardware connected):
@@ -241,7 +241,7 @@ pip3 install -e .
 Create a systemd service file:
 
 ```bash
-sudo nano /etc/systemd/system/airborne-gimbal.service
+sudo nano /etc/systemd/system/cymbal.service
 ```
 
 Add:
@@ -254,8 +254,8 @@ After=network.target pigpiod.service
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/home/pi/airborne-gimbal
-ExecStart=/usr/bin/python3 -m airborne_gimbal.main
+WorkingDirectory=/home/pi/cymbal
+ExecStart=/usr/bin/python3 -m cymbal.main
 Restart=on-failure
 RestartSec=5s
 
@@ -267,9 +267,9 @@ Enable and start:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable airborne-gimbal
-sudo systemctl start airborne-gimbal
-sudo systemctl status airborne-gimbal
+sudo systemctl enable cymbal
+sudo systemctl start cymbal
+sudo systemctl status cymbal
 ```
 
 ## Next Steps

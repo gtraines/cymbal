@@ -7,7 +7,7 @@ This script demonstrates basic control of the spotlight gimbal with stabilizatio
 
 import time
 import sys
-from airborne_gimbal.spotlight_gimbal import SpotlightController
+from cymbal.spotlight_gimbal import SpotlightController
 
 
 def main():

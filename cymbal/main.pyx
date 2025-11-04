@@ -9,11 +9,11 @@ import logging
 import signal
 import sys
 from typing import Optional
-from airborne_gimbal.camera_gimbal.storm32_controller cimport Storm32Controller
-from airborne_gimbal.camera_gimbal.storm32_controller import Storm32Controller
-from airborne_gimbal.spotlight_gimbal.servo_controller cimport SpotlightController
-from airborne_gimbal.spotlight_gimbal.servo_controller import SpotlightController
-from airborne_gimbal.utils.config import SystemConfig
+from cymbal.camera_gimbal.storm32_controller cimport Storm32Controller
+from cymbal.camera_gimbal.storm32_controller import Storm32Controller
+from cymbal.spotlight_gimbal.servo_controller cimport SpotlightController
+from cymbal.spotlight_gimbal.servo_controller import SpotlightController
+from cymbal.utils.config import SystemConfig
 
 
 cdef class GimbalController:
@@ -58,7 +58,7 @@ cdef class GimbalController:
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             handlers=[
                 logging.StreamHandler(sys.stdout),
-                logging.FileHandler('/var/log/airborne_gimbal.log')
+                logging.FileHandler('/var/log/cymbal.log')
             ]
         )
         
@@ -248,7 +248,7 @@ cdef class GimbalController:
 def main():
     """Main entry point."""
     # Load configuration
-    config = SystemConfig.load('/etc/airborne_gimbal/config.json')
+    config = SystemConfig.load('/etc/cymbal/config.json')
     
     # Create and initialize controller
     controller = GimbalController(config)

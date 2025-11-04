@@ -1,5 +1,5 @@
 [Unit]
-Description=Airborne Gimbal Control System
+Description=Cython Airborne Gimbal Control System
 After=network.target pigpiod.service
 Requires=pigpiod.service
 
@@ -7,9 +7,9 @@ Requires=pigpiod.service
 Type=simple
 User=pi
 Group=pi
-WorkingDirectory=/home/pi/airborne-gimbal
+WorkingDirectory=/home/pi/cymbal
 Environment="PYTHONUNBUFFERED=1"
-ExecStart=/usr/bin/python3 -m airborne_gimbal.main
+ExecStart=/usr/bin/python3 -m cymbal.main
 Restart=on-failure
 RestartSec=5s
 StandardOutput=journal

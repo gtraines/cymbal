@@ -2,7 +2,7 @@
 Cython header file for SpotlightController
 """
 
-from airborne_gimbal.sensors.mpu6050 cimport MPU6050
+from cymbal.sensors.mpu6050 cimport MPU6050
 
 cdef class SpotlightController:
     cdef readonly int SERVO_MIN_PULSE
