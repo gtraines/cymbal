@@ -5,6 +5,7 @@ Provides interface to the MPU6050 6-axis accelerometer and gyroscope
 for gimbal stabilization and orientation sensing.
 """
 
+import math
 import time
 import logging
 from typing import Optional, Tuple
@@ -266,7 +267,6 @@ class MPU6050:
         accel_x, accel_y, accel_z = self.get_acceleration()
         
         # Calculate pitch and roll
-        import math
         pitch = math.atan2(accel_y, math.sqrt(accel_x**2 + accel_z**2)) * 180 / math.pi
         roll = math.atan2(-accel_x, accel_z) * 180 / math.pi
         
