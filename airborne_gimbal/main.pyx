@@ -14,12 +14,18 @@ from airborne_gimbal.spotlight_gimbal import SpotlightController
 from airborne_gimbal.utils.config import SystemConfig
 
 
-class GimbalController:
+cdef class GimbalController:
     """
     Main controller for dual gimbal system.
     
     Manages both camera gimbal (Storm32bgc) and spotlight gimbal (servos).
     """
+    
+    cdef object config
+    cdef object logger
+    cdef object camera_gimbal
+    cdef object spotlight_gimbal
+    cdef public bint running
     
     def __init__(self, config: SystemConfig):
         """
@@ -32,8 +38,8 @@ class GimbalController:
         self.logger = self._setup_logging()
         
         # Initialize controllers
-        self.camera_gimbal: Optional[Storm32Controller] = None
-        self.spotlight_gimbal: Optional[SpotlightController] = None
+        self.camera_gimbal = None
+        self.spotlight_gimbal = None
         
         self.running = False
         
@@ -41,7 +47,7 @@ class GimbalController:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
     
-    def _setup_logging(self) -> logging.Logger:
+    def _setup_logging(self):
         """Setup logging configuration."""
         log_level = getattr(logging, self.config.log_level.upper(), logging.INFO)
         
@@ -62,7 +68,7 @@ class GimbalController:
         self.shutdown()
         sys.exit(0)
     
-    def initialize(self) -> bool:
+    cpdef bint initialize(self):
         """
         Initialize both gimbal controllers.
         
@@ -114,7 +120,7 @@ class GimbalController:
             self.logger.error(f"Failed to initialize gimbal system: {e}")
             return False
     
-    def center_all(self) -> None:
+    cpdef void center_all(self):
         """Center both gimbals."""
         self.logger.info("Centering all gimbals...")
         
@@ -124,7 +130,7 @@ class GimbalController:
         if self.spotlight_gimbal:
             self.spotlight_gimbal.center()
     
-    def set_camera_position(self, pitch: float, roll: float, yaw: float) -> bool:
+    cpdef bint set_camera_position(self, double pitch, double roll, double yaw):
         """
         Set camera gimbal position.
         
@@ -142,7 +148,7 @@ class GimbalController:
         
         return self.camera_gimbal.set_angle(pitch, roll, yaw)
     
-    def set_spotlight_position(self, pitch: float, yaw: float) -> bool:
+    cpdef bint set_spotlight_position(self, double pitch, double yaw):
         """
         Set spotlight gimbal position.
         
@@ -159,7 +165,7 @@ class GimbalController:
         
         return self.spotlight_gimbal.set_position(pitch, yaw)
     
-    def sync_gimbals(self, pitch: float, yaw: float) -> None:
+    cpdef void sync_gimbals(self, double pitch, double yaw):
         """
         Synchronize both gimbals to the same orientation.
         
@@ -175,7 +181,7 @@ class GimbalController:
         if self.spotlight_gimbal:
             self.spotlight_gimbal.set_position(pitch, yaw)
     
-    def run_stabilization_loop(self, update_rate: float = 0.1) -> None:
+    cpdef void run_stabilization_loop(self, double update_rate = 0.1):
         """
         Run continuous stabilization loop for spotlight gimbal.
         
@@ -199,14 +205,14 @@ class GimbalController:
         finally:
             self.running = False
     
-    def get_status(self) -> dict:
+    cpdef dict get_status(self):
         """
         Get status of both gimbals.
         
         Returns:
             Dictionary with status information
         """
-        status = {
+        cdef dict status = {
             'camera_gimbal': None,
             'spotlight_gimbal': None
         }
@@ -223,7 +229,7 @@ class GimbalController:
         
         return status
     
-    def shutdown(self) -> None:
+    cpdef void shutdown(self):
         """Shutdown gimbal system."""
         self.logger.info("Shutting down gimbal control system...")
         self.running = False

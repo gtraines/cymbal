@@ -21,7 +21,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class MPU6050:
+cdef class MPU6050:
     """
     Interface for MPU6050 6-axis IMU sensor.
     
@@ -30,26 +30,35 @@ class MPU6050:
     """
     
     # MPU6050 Registers
-    PWR_MGMT_1 = 0x6B
-    SMPLRT_DIV = 0x19
-    CONFIG = 0x1A
-    GYRO_CONFIG = 0x1B
-    ACCEL_CONFIG = 0x1C
-    INT_ENABLE = 0x38
+    cdef readonly int PWR_MGMT_1
+    cdef readonly int SMPLRT_DIV
+    cdef readonly int CONFIG
+    cdef readonly int GYRO_CONFIG
+    cdef readonly int ACCEL_CONFIG
+    cdef readonly int INT_ENABLE
     
     # Data registers
-    ACCEL_XOUT_H = 0x3B
-    ACCEL_YOUT_H = 0x3D
-    ACCEL_ZOUT_H = 0x3F
-    TEMP_OUT_H = 0x41
-    GYRO_XOUT_H = 0x43
-    GYRO_YOUT_H = 0x45
-    GYRO_ZOUT_H = 0x47
+    cdef readonly int ACCEL_XOUT_H
+    cdef readonly int ACCEL_YOUT_H
+    cdef readonly int ACCEL_ZOUT_H
+    cdef readonly int TEMP_OUT_H
+    cdef readonly int GYRO_XOUT_H
+    cdef readonly int GYRO_YOUT_H
+    cdef readonly int GYRO_ZOUT_H
     
     # Default I2C address
-    DEFAULT_ADDRESS = 0x68
+    cdef readonly int DEFAULT_ADDRESS
     
-    def __init__(self, address: int = DEFAULT_ADDRESS, bus: int = 1):
+    cdef public int address
+    cdef public int bus_num
+    cdef object bus
+    cdef bint _is_initialized
+    
+    # Calibration offsets
+    cdef public dict accel_offset
+    cdef public dict gyro_offset
+    
+    def __init__(self, int address = 0x68, int bus = 1):
         """
         Initialize MPU6050 sensor.
         
@@ -57,16 +66,34 @@ class MPU6050:
             address: I2C address (default: 0x68)
             bus: I2C bus number (default: 1 for Raspberry Pi)
         """
+        # Initialize register constants
+        self.PWR_MGMT_1 = 0x6B
+        self.SMPLRT_DIV = 0x19
+        self.CONFIG = 0x1A
+        self.GYRO_CONFIG = 0x1B
+        self.ACCEL_CONFIG = 0x1C
+        self.INT_ENABLE = 0x38
+        
+        self.ACCEL_XOUT_H = 0x3B
+        self.ACCEL_YOUT_H = 0x3D
+        self.ACCEL_ZOUT_H = 0x3F
+        self.TEMP_OUT_H = 0x41
+        self.GYRO_XOUT_H = 0x43
+        self.GYRO_YOUT_H = 0x45
+        self.GYRO_ZOUT_H = 0x47
+        
+        self.DEFAULT_ADDRESS = 0x68
+        
         self.address = address
         self.bus_num = bus
-        self.bus: Optional[smbus.SMBus] = None
+        self.bus = None
         self._is_initialized = False
         
         # Calibration offsets
-        self.accel_offset = {'x': 0, 'y': 0, 'z': 0}
-        self.gyro_offset = {'x': 0, 'y': 0, 'z': 0}
+        self.accel_offset = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        self.gyro_offset = {'x': 0.0, 'y': 0.0, 'z': 0.0}
     
-    def initialize(self) -> bool:
+    cpdef bint initialize(self):
         """
         Initialize the MPU6050 sensor.
         
@@ -105,11 +132,11 @@ class MPU6050:
             self._is_initialized = False
             return False
     
-    def is_initialized(self) -> bool:
+    cpdef bint is_initialized(self):
         """Check if sensor is initialized."""
         return self._is_initialized
     
-    def read_raw_data(self, register: int) -> int:
+    cdef int read_raw_data(self, int register):
         """
         Read raw 16-bit data from sensor register.
         
@@ -119,6 +146,8 @@ class MPU6050:
         Returns:
             16-bit signed integer value
         """
+        cdef int high, low, value
+        
         if not self.bus:
             raise RuntimeError("MPU6050 not initialized")
         
@@ -135,13 +164,17 @@ class MPU6050:
         
         return value
     
-    def get_acceleration(self) -> Tuple[float, float, float]:
+    cpdef tuple get_acceleration(self):
         """
         Get acceleration values in g (gravity units).
         
         Returns:
             Tuple of (x, y, z) acceleration in g
         """
+        cdef int accel_x, accel_y, accel_z
+        cdef double accel_scale = 16384.0
+        cdef double x, y, z
+        
         if not self.is_initialized():
             raise RuntimeError("MPU6050 not initialized")
         
@@ -151,21 +184,23 @@ class MPU6050:
         accel_z = self.read_raw_data(self.ACCEL_ZOUT_H)
         
         # Convert to g (for ±2g range: sensitivity = 16384 LSB/g)
-        accel_scale = 16384.0
-        
         x = (accel_x / accel_scale) - self.accel_offset['x']
         y = (accel_y / accel_scale) - self.accel_offset['y']
         z = (accel_z / accel_scale) - self.accel_offset['z']
         
         return (x, y, z)
     
-    def get_gyroscope(self) -> Tuple[float, float, float]:
+    cpdef tuple get_gyroscope(self):
         """
         Get gyroscope values in degrees per second.
         
         Returns:
             Tuple of (x, y, z) angular velocity in deg/s
         """
+        cdef int gyro_x, gyro_y, gyro_z
+        cdef double gyro_scale = 131.0
+        cdef double x, y, z
+        
         if not self.is_initialized():
             raise RuntimeError("MPU6050 not initialized")
         
@@ -175,21 +210,22 @@ class MPU6050:
         gyro_z = self.read_raw_data(self.GYRO_ZOUT_H)
         
         # Convert to deg/s (for ±250 deg/s range: sensitivity = 131 LSB/(deg/s))
-        gyro_scale = 131.0
-        
         x = (gyro_x / gyro_scale) - self.gyro_offset['x']
         y = (gyro_y / gyro_scale) - self.gyro_offset['y']
         z = (gyro_z / gyro_scale) - self.gyro_offset['z']
         
         return (x, y, z)
     
-    def get_temperature(self) -> float:
+    cpdef double get_temperature(self):
         """
         Get temperature reading from sensor.
         
         Returns:
             Temperature in Celsius
         """
+        cdef int raw_temp
+        cdef double temperature
+        
         if not self.is_initialized():
             raise RuntimeError("MPU6050 not initialized")
         
@@ -198,7 +234,7 @@ class MPU6050:
         temperature = (raw_temp / 340.0) + 36.53
         return temperature
     
-    def calibrate(self, samples: int = 100) -> bool:
+    cpdef bint calibrate(self, int samples = 100):
         """
         Calibrate the sensor by averaging readings while stationary.
         
@@ -208,17 +244,20 @@ class MPU6050:
         Returns:
             True if calibration successful, False otherwise
         """
+        cdef int i
+        cdef double accel_x, accel_y, accel_z
+        cdef double gyro_x, gyro_y, gyro_z
+        cdef dict accel_sum = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        cdef dict gyro_sum = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        
         if not self.is_initialized():
             logger.error("Cannot calibrate: MPU6050 not initialized")
             return False
         
         logger.info(f"Calibrating MPU6050 with {samples} samples...")
         
-        accel_sum = {'x': 0, 'y': 0, 'z': 0}
-        gyro_sum = {'x': 0, 'y': 0, 'z': 0}
-        
         try:
-            for _ in range(samples):
+            for i in range(samples):
                 # Read accelerometer
                 accel_x = self.read_raw_data(self.ACCEL_XOUT_H) / 16384.0
                 accel_y = self.read_raw_data(self.ACCEL_YOUT_H) / 16384.0
@@ -257,13 +296,16 @@ class MPU6050:
             logger.error(f"Calibration failed: {e}")
             return False
     
-    def get_orientation(self) -> Tuple[float, float]:
+    cpdef tuple get_orientation(self):
         """
         Calculate pitch and roll angles from accelerometer.
         
         Returns:
             Tuple of (pitch, roll) in degrees
         """
+        cdef double accel_x, accel_y, accel_z
+        cdef double pitch, roll
+        
         accel_x, accel_y, accel_z = self.get_acceleration()
         
         # Calculate pitch and roll
@@ -272,7 +314,7 @@ class MPU6050:
         
         return (pitch, roll)
     
-    def close(self) -> None:
+    cpdef void close(self):
         """Close I2C bus connection."""
         if self.bus:
             self.bus.close()

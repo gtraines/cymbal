@@ -2,22 +2,62 @@
 
 This project has been rewritten in Cython for improved performance and efficiency. Cython is a superset of Python that compiles to C, providing significant speed improvements while maintaining Python's ease of use.
 
+**All core classes use `cdef class` (extension types) for maximum performance!**
+
 ## Overview
 
-All core modules have been converted to Cython (`.pyx` files):
+All core modules have been converted to Cython (`.pyx` files) with proper Cython syntax:
 
-- `airborne_gimbal/camera_gimbal/storm32_controller.pyx` - Storm32bgc camera gimbal controller
-- `airborne_gimbal/spotlight_gimbal/servo_controller.pyx` - Spotlight servo controller
-- `airborne_gimbal/sensors/mpu6050.pyx` - MPU6050 IMU interface
-- `airborne_gimbal/utils/config.pyx` - Configuration management
-- `airborne_gimbal/main.pyx` - Main control application
+- `airborne_gimbal/camera_gimbal/storm32_controller.pyx` - Storm32bgc camera gimbal controller (`cdef class`)
+- `airborne_gimbal/spotlight_gimbal/servo_controller.pyx` - Spotlight servo controller (`cdef class`)
+- `airborne_gimbal/sensors/mpu6050.pyx` - MPU6050 IMU interface (`cdef class`)
+- `airborne_gimbal/utils/config.pyx` - Configuration management (dataclasses)
+- `airborne_gimbal/main.pyx` - Main control application (`cdef class`)
+
+## Cython Features Used
+
+### Extension Types (`cdef class`)
+
+All main controller classes are implemented as Cython extension types for optimal performance:
+
+```cython
+cdef class Storm32Controller:
+    cdef public str port
+    cdef public int baudrate
+    cdef public double timeout
+    cdef object serial_conn
+    cdef bint _is_connected
+```
+
+### Typed Methods
+
+Methods use `cpdef` for public APIs (callable from Python and Cython) and `cdef` for internal methods:
+
+```cython
+cpdef bint connect(self):  # Public method
+    """Connect to device"""
+    ...
+
+cdef bytes _build_command(self, double angle):  # Private method
+    """Build internal command"""
+    ...
+```
+
+### C Type Declarations
+
+Variables use C types for maximum performance:
+- `int` - C integer
+- `double` - C double precision float
+- `bint` - C boolean
+- `cdef` - C-level variable
 
 ## Benefits of Cython
 
 1. **Performance**: Compiled C extensions run significantly faster than pure Python
-2. **Type Safety**: Optional type declarations catch errors at compile time
+2. **Type Safety**: Type declarations catch errors at compile time
 3. **C Integration**: Direct access to C libraries and APIs
 4. **Python Compatibility**: Can still be imported and used like regular Python modules
+5. **Extension Types**: `cdef class` provides C-level object attributes for speed
 
 ## Building from Source
 

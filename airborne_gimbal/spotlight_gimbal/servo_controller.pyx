@@ -18,7 +18,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class SpotlightController:
+cdef class SpotlightController:
     """
     Controller for spotlight gimbal using two 360-degree servos.
     
@@ -27,17 +27,32 @@ class SpotlightController:
     """
     
     # Servo PWM parameters (standard servo pulse widths in microseconds)
-    SERVO_MIN_PULSE = 1000  # Minimum pulse width (microseconds)
-    SERVO_MAX_PULSE = 2000  # Maximum pulse width (microseconds)
-    SERVO_CENTER_PULSE = 1500  # Center/stop pulse width
+    cdef readonly int SERVO_MIN_PULSE
+    cdef readonly int SERVO_MAX_PULSE
+    cdef readonly int SERVO_CENTER_PULSE
+    
+    cdef public int pitch_pin
+    cdef public int yaw_pin
+    cdef public bint use_stabilization
+    
+    cdef object pi
+    cdef object mpu
+    
+    # Current target positions
+    cdef public double target_pitch
+    cdef public double target_yaw
+    
+    # Current PWM values
+    cdef public int pitch_pwm
+    cdef public int yaw_pwm
     
     def __init__(
         self,
-        pitch_pin: int = 17,
-        yaw_pin: int = 27,
-        i2c_address: int = 0x68,
-        i2c_bus: int = 1,
-        use_stabilization: bool = True
+        int pitch_pin = 17,
+        int yaw_pin = 27,
+        int i2c_address = 0x68,
+        int i2c_bus = 1,
+        bint use_stabilization = True
     ):
         """
         Initialize spotlight gimbal controller.
@@ -49,12 +64,17 @@ class SpotlightController:
             i2c_bus: I2C bus number (default: 1)
             use_stabilization: Enable IMU-based stabilization
         """
+        # Initialize constants
+        self.SERVO_MIN_PULSE = 1000
+        self.SERVO_MAX_PULSE = 2000
+        self.SERVO_CENTER_PULSE = 1500
+        
         self.pitch_pin = pitch_pin
         self.yaw_pin = yaw_pin
         self.use_stabilization = use_stabilization
         
-        self.pi: Optional[pigpio.pi] = None
-        self.mpu: Optional[MPU6050] = None
+        self.pi = None
+        self.mpu = None
         
         # Current target positions
         self.target_pitch = 0.0
@@ -68,7 +88,7 @@ class SpotlightController:
         if use_stabilization:
             self.mpu = MPU6050(address=i2c_address, bus=i2c_bus)
     
-    def initialize(self) -> bool:
+    cpdef bint initialize(self):
         """
         Initialize GPIO and IMU sensor.
         
@@ -112,11 +132,11 @@ class SpotlightController:
             logger.error(f"Failed to initialize spotlight controller: {e}")
             return False
     
-    def is_initialized(self) -> bool:
+    cpdef bint is_initialized(self):
         """Check if controller is initialized."""
         return self.pi is not None and self.pi.connected
     
-    def set_position(self, pitch: float, yaw: float) -> bool:
+    cpdef bint set_position(self, double pitch, double yaw):
         """
         Set spotlight gimbal position.
         
@@ -127,21 +147,28 @@ class SpotlightController:
         Returns:
             True if command sent successfully, False otherwise
         """
+        cdef int pitch_pulse, yaw_pulse
+        
         if not self.is_initialized():
             logger.error("Cannot set position: Controller not initialized")
             return False
         
         try:
             # Clamp values to valid ranges
-            pitch = max(-90, min(90, pitch))
-            yaw = max(-180, min(180, yaw))
+            if pitch < -90:
+                pitch = -90
+            elif pitch > 90:
+                pitch = 90
+                
+            if yaw < -180:
+                yaw = -180
+            elif yaw > 180:
+                yaw = 180
             
             self.target_pitch = pitch
             self.target_yaw = yaw
             
             # Convert angles to PWM pulse widths
-            # For 360-degree servos, we use speed control
-            # Center = stop, min = full speed CCW, max = full speed CW
             self.pitch_pwm = self._angle_to_pulse(pitch, -90, 90)
             self.yaw_pwm = self._angle_to_pulse(yaw, -180, 180)
             
@@ -156,7 +183,7 @@ class SpotlightController:
             logger.error(f"Failed to set position: {e}")
             return False
     
-    def set_speed(self, pitch_speed: float, yaw_speed: float) -> bool:
+    cpdef bint set_speed(self, double pitch_speed, double yaw_speed):
         """
         Set spotlight gimbal rotation speeds.
         
@@ -169,14 +196,23 @@ class SpotlightController:
         Returns:
             True if command sent successfully, False otherwise
         """
+        cdef int pitch_pulse, yaw_pulse
+        
         if not self.is_initialized():
             logger.error("Cannot set speed: Controller not initialized")
             return False
         
         try:
             # Clamp speeds to valid range
-            pitch_speed = max(-100, min(100, pitch_speed))
-            yaw_speed = max(-100, min(100, yaw_speed))
+            if pitch_speed < -100:
+                pitch_speed = -100
+            elif pitch_speed > 100:
+                pitch_speed = 100
+                
+            if yaw_speed < -100:
+                yaw_speed = -100
+            elif yaw_speed > 100:
+                yaw_speed = 100
             
             # Convert speed to PWM pulse width
             pitch_pulse = self.SERVO_CENTER_PULSE + int(pitch_speed * 5)  # ±500µs range
@@ -192,7 +228,7 @@ class SpotlightController:
             logger.error(f"Failed to set speed: {e}")
             return False
     
-    def stop(self) -> bool:
+    cpdef bint stop(self):
         """
         Stop all gimbal movement.
         
@@ -201,7 +237,7 @@ class SpotlightController:
         """
         return self.set_speed(0, 0)
     
-    def center(self) -> bool:
+    cpdef bint center(self):
         """
         Center the gimbal (all axes to 0 degrees).
         
@@ -210,7 +246,7 @@ class SpotlightController:
         """
         return self.set_position(0, 0)
     
-    def get_orientation(self) -> Optional[Tuple[float, float]]:
+    cpdef object get_orientation(self):
         """
         Get current orientation from IMU.
         
@@ -226,13 +262,17 @@ class SpotlightController:
             logger.error(f"Failed to get orientation: {e}")
             return None
     
-    def stabilize(self) -> bool:
+    cpdef bint stabilize(self):
         """
         Perform one stabilization update using IMU feedback.
         
         Returns:
             True if stabilization performed, False otherwise
         """
+        cdef double pitch, roll
+        cdef double correction_pitch, correction_yaw
+        cdef double stabilized_pitch, stabilized_yaw
+        
         if not self.use_stabilization:
             return False
         
@@ -243,7 +283,6 @@ class SpotlightController:
         pitch, roll = orientation
         
         # Simple stabilization: counteract detected tilt
-        # In a real implementation, this would use a proper control loop (PID)
         correction_pitch = -pitch * 0.5  # Proportional correction
         correction_yaw = -roll * 0.5
         
@@ -253,7 +292,7 @@ class SpotlightController:
         
         return self.set_position(stabilized_pitch, stabilized_yaw)
     
-    def _angle_to_pulse(self, angle: float, min_angle: float, max_angle: float) -> int:
+    cdef int _angle_to_pulse(self, double angle, double min_angle, double max_angle):
         """
         Convert angle to PWM pulse width.
         
@@ -265,6 +304,9 @@ class SpotlightController:
         Returns:
             PWM pulse width in microseconds
         """
+        cdef double normalized
+        cdef int pulse
+        
         # Normalize angle to 0-1 range
         normalized = (angle - min_angle) / (max_angle - min_angle)
         
@@ -273,7 +315,7 @@ class SpotlightController:
         
         return pulse
     
-    def close(self) -> None:
+    cpdef void close(self):
         """Shutdown controller and cleanup resources."""
         try:
             if self.pi:

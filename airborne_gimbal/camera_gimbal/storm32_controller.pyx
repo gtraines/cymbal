@@ -15,7 +15,7 @@ from typing import Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
-class Storm32Controller:
+cdef class Storm32Controller:
     """
     Controller for Storm32bgc brushless gimbal.
     
@@ -23,11 +23,17 @@ class Storm32Controller:
     to control camera gimbal pitch, roll, and yaw.
     """
     
+    cdef public str port
+    cdef public int baudrate
+    cdef public double timeout
+    cdef object serial_conn
+    cdef bint _is_connected
+    
     def __init__(
         self,
-        port: str = "/dev/ttyAMA0",
-        baudrate: int = 115200,
-        timeout: float = 1.0
+        str port = "/dev/ttyAMA0",
+        int baudrate = 115200,
+        double timeout = 1.0
     ):
         """
         Initialize Storm32 controller.
@@ -40,10 +46,10 @@ class Storm32Controller:
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
-        self.serial_conn: Optional[serial.Serial] = None
+        self.serial_conn = None
         self._is_connected = False
         
-    def connect(self) -> bool:
+    cpdef bint connect(self):
         """
         Establish serial connection to Storm32 controller.
         
@@ -67,18 +73,18 @@ class Storm32Controller:
             self._is_connected = False
             return False
     
-    def disconnect(self) -> None:
+    cpdef void disconnect(self):
         """Close serial connection."""
         if self.serial_conn and self.serial_conn.is_open:
             self.serial_conn.close()
             self._is_connected = False
             logger.info("Disconnected from Storm32")
     
-    def is_connected(self) -> bool:
+    cpdef bint is_connected(self):
         """Check if controller is connected."""
         return self._is_connected and self.serial_conn and self.serial_conn.is_open
     
-    def set_angle(self, pitch: float, roll: float, yaw: float) -> bool:
+    cpdef bint set_angle(self, double pitch, double roll, double yaw):
         """
         Set gimbal angles.
         
@@ -96,12 +102,22 @@ class Storm32Controller:
         
         try:
             # Clamp values to valid ranges
-            pitch = max(-90, min(90, pitch))
-            roll = max(-90, min(90, roll))
-            yaw = max(-180, min(180, yaw))
+            if pitch < -90:
+                pitch = -90
+            elif pitch > 90:
+                pitch = 90
+                
+            if roll < -90:
+                roll = -90
+            elif roll > 90:
+                roll = 90
+                
+            if yaw < -180:
+                yaw = -180
+            elif yaw > 180:
+                yaw = 180
             
             # Storm32 MAVLink command format (simplified)
-            # In a real implementation, this would use proper MAVLink encoding
             command = self._build_angle_command(pitch, roll, yaw)
             self.serial_conn.write(command)
             logger.debug(f"Set angles - Pitch: {pitch}, Roll: {roll}, Yaw: {yaw}")
@@ -110,7 +126,7 @@ class Storm32Controller:
             logger.error(f"Failed to set angle: {e}")
             return False
     
-    def set_speed(self, pitch_speed: float, roll_speed: float, yaw_speed: float) -> bool:
+    cpdef bint set_speed(self, double pitch_speed, double roll_speed, double yaw_speed):
         """
         Set gimbal rotation speeds.
         
@@ -135,7 +151,7 @@ class Storm32Controller:
             logger.error(f"Failed to set speed: {e}")
             return False
     
-    def get_status(self) -> Optional[dict]:
+    cpdef object get_status(self):
         """
         Get current gimbal status.
         
@@ -159,7 +175,7 @@ class Storm32Controller:
             logger.error(f"Failed to get status: {e}")
             return None
     
-    def center(self) -> bool:
+    cpdef bint center(self):
         """
         Center the gimbal (all axes to 0 degrees).
         
@@ -168,18 +184,16 @@ class Storm32Controller:
         """
         return self.set_angle(0, 0, 0)
     
-    def _build_angle_command(self, pitch: float, roll: float, yaw: float) -> bytes:
+    cdef bytes _build_angle_command(self, double pitch, double roll, double yaw):
         """
         Build MAVLink command for setting angles.
         
         In a real implementation, this would use proper MAVLink message encoding
         with checksums and proper message IDs.
         """
-        # Placeholder - real implementation would use pymavlink
-        # Converting angles to int16 values (degrees * 100)
-        pitch_int = int(pitch * 100)
-        roll_int = int(roll * 100)
-        yaw_int = int(yaw * 100)
+        cdef int pitch_int = int(pitch * 100)
+        cdef int roll_int = int(roll * 100)
+        cdef int yaw_int = int(yaw * 100)
         
         # Simplified command format
         command = bytearray([0xFA, 0x0E])  # Header
@@ -188,12 +202,11 @@ class Storm32Controller:
         command.extend(yaw_int.to_bytes(2, 'little', signed=True))
         return bytes(command)
     
-    def _build_speed_command(self, pitch_speed: float, roll_speed: float, yaw_speed: float) -> bytes:
+    cdef bytes _build_speed_command(self, double pitch_speed, double roll_speed, double yaw_speed):
         """Build MAVLink command for setting rotation speeds."""
-        # Placeholder implementation
-        speed_p = int(pitch_speed * 10)
-        speed_r = int(roll_speed * 10)
-        speed_y = int(yaw_speed * 10)
+        cdef int speed_p = int(pitch_speed * 10)
+        cdef int speed_r = int(roll_speed * 10)
+        cdef int speed_y = int(yaw_speed * 10)
         
         command = bytearray([0xFA, 0x0F])  # Header
         command.extend(speed_p.to_bytes(2, 'little', signed=True))
@@ -201,12 +214,11 @@ class Storm32Controller:
         command.extend(speed_y.to_bytes(2, 'little', signed=True))
         return bytes(command)
     
-    def _build_status_request(self) -> bytes:
+    cdef bytes _build_status_request(self):
         """Build MAVLink status request command."""
-        # Placeholder implementation
         return bytes([0xFA, 0x10])  # Header for status request
     
-    def _parse_status_response(self, response: bytes) -> dict:
+    cdef dict _parse_status_response(self, bytes response):
         """Parse status response from Storm32."""
         # Placeholder implementation
         return {
