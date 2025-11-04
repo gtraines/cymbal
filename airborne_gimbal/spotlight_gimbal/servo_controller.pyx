@@ -8,6 +8,7 @@ with MPU6050 IMU for stabilization.
 import time
 import logging
 from typing import Optional, Tuple
+from airborne_gimbal.sensors.mpu6050 cimport MPU6050
 from airborne_gimbal.sensors.mpu6050 import MPU6050
 
 try:
@@ -25,26 +26,6 @@ cdef class SpotlightController:
     Uses PWM control via GPIO pins and MPU6050 for orientation feedback
     and stabilization.
     """
-    
-    # Servo PWM parameters (standard servo pulse widths in microseconds)
-    cdef readonly int SERVO_MIN_PULSE
-    cdef readonly int SERVO_MAX_PULSE
-    cdef readonly int SERVO_CENTER_PULSE
-    
-    cdef public int pitch_pin
-    cdef public int yaw_pin
-    cdef public bint use_stabilization
-    
-    cdef object pi
-    cdef object mpu
-    
-    # Current target positions
-    cdef public double target_pitch
-    cdef public double target_yaw
-    
-    # Current PWM values
-    cdef public int pitch_pwm
-    cdef public int yaw_pwm
     
     def __init__(
         self,

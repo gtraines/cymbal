@@ -5,7 +5,7 @@ Provides interface to the MPU6050 6-axis accelerometer and gyroscope
 for gimbal stabilization and orientation sensing.
 """
 
-import math
+from libc.math cimport atan2, sqrt, M_PI
 import time
 import logging
 from typing import Optional, Tuple
@@ -28,35 +28,6 @@ cdef class MPU6050:
     Provides accelerometer and gyroscope data for gimbal stabilization.
     Communicates via I2C bus.
     """
-    
-    # MPU6050 Registers
-    cdef readonly int PWR_MGMT_1
-    cdef readonly int SMPLRT_DIV
-    cdef readonly int CONFIG
-    cdef readonly int GYRO_CONFIG
-    cdef readonly int ACCEL_CONFIG
-    cdef readonly int INT_ENABLE
-    
-    # Data registers
-    cdef readonly int ACCEL_XOUT_H
-    cdef readonly int ACCEL_YOUT_H
-    cdef readonly int ACCEL_ZOUT_H
-    cdef readonly int TEMP_OUT_H
-    cdef readonly int GYRO_XOUT_H
-    cdef readonly int GYRO_YOUT_H
-    cdef readonly int GYRO_ZOUT_H
-    
-    # Default I2C address
-    cdef readonly int DEFAULT_ADDRESS
-    
-    cdef public int address
-    cdef public int bus_num
-    cdef object bus
-    cdef bint _is_initialized
-    
-    # Calibration offsets
-    cdef public dict accel_offset
-    cdef public dict gyro_offset
     
     def __init__(self, int address = 0x68, int bus = 1):
         """
@@ -308,9 +279,9 @@ cdef class MPU6050:
         
         accel_x, accel_y, accel_z = self.get_acceleration()
         
-        # Calculate pitch and roll
-        pitch = math.atan2(accel_y, math.sqrt(accel_x**2 + accel_z**2)) * 180 / math.pi
-        roll = math.atan2(-accel_x, accel_z) * 180 / math.pi
+        # Calculate pitch and roll using C math functions
+        pitch = atan2(accel_y, sqrt(accel_x**2 + accel_z**2)) * 180.0 / M_PI
+        roll = atan2(-accel_x, accel_z) * 180.0 / M_PI
         
         return (pitch, roll)
     

@@ -9,8 +9,10 @@ import logging
 import signal
 import sys
 from typing import Optional
-from airborne_gimbal.camera_gimbal import Storm32Controller
-from airborne_gimbal.spotlight_gimbal import SpotlightController
+from airborne_gimbal.camera_gimbal.storm32_controller cimport Storm32Controller
+from airborne_gimbal.camera_gimbal.storm32_controller import Storm32Controller
+from airborne_gimbal.spotlight_gimbal.servo_controller cimport SpotlightController
+from airborne_gimbal.spotlight_gimbal.servo_controller import SpotlightController
 from airborne_gimbal.utils.config import SystemConfig
 
 
@@ -23,8 +25,8 @@ cdef class GimbalController:
     
     cdef object config
     cdef object logger
-    cdef object camera_gimbal
-    cdef object spotlight_gimbal
+    cdef Storm32Controller camera_gimbal
+    cdef SpotlightController spotlight_gimbal
     cdef public bint running
     
     def __init__(self, config: SystemConfig):

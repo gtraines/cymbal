@@ -23,12 +23,6 @@ cdef class Storm32Controller:
     to control camera gimbal pitch, roll, and yaw.
     """
     
-    cdef public str port
-    cdef public int baudrate
-    cdef public double timeout
-    cdef object serial_conn
-    cdef bint _is_connected
-    
     def __init__(
         self,
         str port = "/dev/ttyAMA0",
