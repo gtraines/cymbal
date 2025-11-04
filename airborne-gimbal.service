@@ -1,0 +1,23 @@
+[Unit]
+Description=Airborne Gimbal Control System
+After=network.target pigpiod.service
+Requires=pigpiod.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/airborne-gimbal
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/usr/bin/python3 -m airborne_gimbal.main
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening (optional)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

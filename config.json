@@ -1,0 +1,15 @@
+{
+  "camera_gimbal": {
+    "serial_port": "/dev/ttyAMA0",
+    "baudrate": 115200,
+    "timeout": 1.0
+  },
+  "spotlight_gimbal": {
+    "pitch_pin": 17,
+    "yaw_pin": 27,
+    "i2c_address": 104,
+    "i2c_bus": 1,
+    "use_stabilization": true
+  },
+  "log_level": "INFO"
+}
