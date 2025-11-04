@@ -1,6 +1,6 @@
 # Installation Guide
 
-This guide provides detailed installation instructions for setting up the Airborne Gimbal Control System on a Raspberry Pi 3B+.
+This guide provides detailed installation instructions for setting up the Cymbal Airborne Gimbal Control System on a Raspberry Pi 3B+.
 
 ## Prerequisites
 
@@ -248,7 +248,7 @@ Add:
 
 ```ini
 [Unit]
-Description=Airborne Gimbal Control System
+Description=Cymbal Airborne Gimbal Control System
 After=network.target pigpiod.service
 
 [Service]

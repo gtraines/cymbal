@@ -1,5 +1,5 @@
 """
-Basic import tests for airborne gimbal modules.
+Basic import tests for cymbal airborne gimbal modules.
 
 These tests verify that all modules can be imported without errors.
 """

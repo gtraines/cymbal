@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Airborne Gimbal Control System provides a Python API for controlling dual gimbals on fixed-wing drones. The system consists of three main components:
+The Cymbal Airborne Gimbal Control System provides a Python API for controlling dual gimbals on fixed-wing drones. The system consists of three main components:
 
 1. **Storm32Controller** - Camera gimbal control via Storm32bgc
 2. **SpotlightController** - Spotlight gimbal control via servos

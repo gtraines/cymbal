@@ -1,5 +1,5 @@
 """
-Configuration management for airborne gimbal system.
+Configuration management for cymbal airborne gimbal system.
 """
 
 import json

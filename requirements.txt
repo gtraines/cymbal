@@ -1,4 +1,4 @@
-# Airborne Gimbal Control System - Python/Cython Dependencies
+# Cymbal Airborne Gimbal Control System - Python/Cython Dependencies
 
 # Cython for compiled extensions
 Cython>=0.29.0

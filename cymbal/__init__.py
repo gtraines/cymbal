@@ -1,5 +1,5 @@
 """
-Airborne Gimbal Control System
+Cymbal Airborne Gimbal Control System
 
 A Python package for controlling dual gimbals (camera and spotlight) 
 on a fixed-wing drone via Raspberry Pi 3B+.

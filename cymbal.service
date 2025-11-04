@@ -1,5 +1,5 @@
 [Unit]
-Description=Cython Airborne Gimbal Control System
+Description=Cython Cymbal Airborne Gimbal Control System
 After=network.target pigpiod.service
 Requires=pigpiod.service
 

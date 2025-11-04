@@ -3,7 +3,7 @@
 
 set -e
 
-echo "Building Cython extensions for Airborne Gimbal Control System..."
+echo "Building Cython extensions for Cymbal Airborne Gimbal Control System..."
 
 # Install build dependencies
 echo "Installing build dependencies..."

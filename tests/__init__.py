@@ -1,1 +1,1 @@
-"""Tests for airborne gimbal control system."""
+"""Tests for cymbal airborne gimbal control system."""

@@ -1,4 +1,4 @@
-# Project Summary: Airborne Gimbal Control System
+# Project Summary: Cymbal Airborne Gimbal Control System
 
 ## Overview
 
