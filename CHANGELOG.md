@@ -5,6 +5,55 @@ All notable changes to the Airborne Gimbal Control System will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-11-04
+
+### Changed
+
+#### Cython Implementation
+- **Complete rewrite to Cython** - All Python modules converted to Cython (.pyx files)
+  - `storm32_controller.pyx` - Camera gimbal controller
+  - `servo_controller.pyx` - Spotlight gimbal controller
+  - `mpu6050.pyx` - IMU sensor interface
+  - `config.pyx` - Configuration management
+  - `main.pyx` - Main control application
+
+#### Performance Improvements
+- Compiled C extensions for significantly faster execution
+- Optimized math operations and tight loops
+- Reduced Python overhead in critical paths
+- Near-native C speed for hardware interfacing
+
+#### Build System
+- Updated `setup.py` with Cython build configuration
+- Added `build_cython.sh` build script for easy compilation
+- Configured compiler directives for optimal performance
+- Added Cython to requirements.txt
+
+#### Documentation
+- Added `docs/CYTHON.md` - Comprehensive Cython implementation guide
+- Updated README.md with Cython build instructions
+- Added build troubleshooting section
+- Updated installation guide for Cython dependencies
+
+#### Development
+- Updated `.gitignore` for Cython build artifacts (.c, .cpp, .html files)
+- Maintained 100% API compatibility with Python version
+- All imports and usage remain unchanged
+
+### Technical Details
+
+**Compiler Directives:**
+- `language_level: 3` - Python 3 semantics
+- `embedsignature: True` - Function signature embedding
+- `boundscheck: False` - Array bounds checking disabled for speed
+- `wraparound: False` - Negative indexing disabled for speed
+- `cdivision: True` - C division semantics for speed
+
+**Build Requirements:**
+- Cython >= 0.29.0
+- build-essential (gcc, make)
+- python3-dev
+
 ## [0.1.0] - 2025-11-04
 
 ### Added

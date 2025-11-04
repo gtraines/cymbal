@@ -2,6 +2,8 @@
 
 Control software for dual gimbals (camera and spotlight) mounted on a fixed-wing drone, controlled from a Raspberry Pi 3B+.
 
+**⚡ Now with Cython for improved performance!**
+
 ## Overview
 
 This system controls two independent gimbals:
@@ -17,6 +19,12 @@ This system controls two independent gimbals:
    - IMU-based stabilization for maintaining orientation
 
 Both gimbals are mounted on the bottom of the fixed-wing drone and controlled simultaneously from a Raspberry Pi 3B+.
+
+### Cython Implementation
+
+This project is implemented in **Cython** for optimal performance. All core modules are compiled to native C extensions, providing significant speed improvements while maintaining Python compatibility.
+
+For details on building and using the Cython implementation, see [docs/CYTHON.md](docs/CYTHON.md).
 
 ## Hardware Requirements
 
@@ -46,10 +54,12 @@ On Raspberry Pi, install required system packages:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y python3-pip python3-dev i2c-tools pigpio
+sudo apt-get install -y python3-pip python3-dev build-essential i2c-tools pigpio
 sudo systemctl enable pigpiod
 sudo systemctl start pigpiod
 ```
+
+**Note**: `build-essential` and `python3-dev` are required for building Cython extensions.
 
 ### 2. Enable I2C and UART
 
@@ -81,7 +91,15 @@ Clone the repository and install dependencies:
 ```bash
 git clone https://github.com/gtraines/airborne-gimbal.git
 cd airborne-gimbal
+
+# Install dependencies (includes Cython)
 pip3 install -r requirements.txt
+
+# Build Cython extensions
+./build_cython.sh
+
+# Install the package
+pip3 install -e .
 ```
 
 ### 4. Verify Hardware Connections
