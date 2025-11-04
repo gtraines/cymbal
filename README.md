@@ -1,4 +1,5 @@
-# Airborne Gimbal Control System
+# Cymbal: Cython gimbal controller
+Code for control of a camera gimbal on a fixed-wing drone and overlay information about the location that the camera is looking at.
 
 Control software for dual gimbals (camera and spotlight) mounted on a fixed-wing drone, controlled from a Raspberry Pi 3B+.
 
@@ -360,3 +361,4 @@ See LICENSE file for details.
 ## Support
 
 For issues and questions, please open an issue on GitHub.
+
