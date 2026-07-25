@@ -57,11 +57,20 @@ extensions = [
         "cymbal.inputs.sbus_reader",
         ["cymbal/inputs/sbus_reader.pyx"],
     ),
+    # --- Phase 4: OSD, channel mapper ---
+    Extension(
+        "cymbal.osd.overlay_controller",
+        ["cymbal/osd/overlay_controller.pyx"],
+    ),
+    Extension(
+        "cymbal.inputs.channel_mapper",
+        ["cymbal/inputs/channel_mapper.pyx"],
+    ),
 ]
 
 setup(
     name="cymbal",
-    version="0.3.0",
+    version="0.4.0",
     author="gtraines",
     description="Control software for dual gimbals on fixed-wing drones (Cython optimized)",
     long_description=long_description,

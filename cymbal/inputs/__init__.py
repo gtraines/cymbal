@@ -2,5 +2,6 @@
 
 from cymbal.inputs.sbus_decoder import SBUSDecoder
 from cymbal.inputs.sbus_reader import SBUSReader
+from cymbal.inputs.channel_mapper import ChannelMapper
 
-__all__ = ["SBUSDecoder", "SBUSReader"]
+__all__ = ["SBUSDecoder", "SBUSReader", "ChannelMapper"]
