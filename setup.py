@@ -48,11 +48,20 @@ extensions = [
         "cymbal.sensors.gps_sensor",
         ["cymbal/sensors/gps_sensor.pyx"],
     ),
+    # --- Phase 3: S-BUS ---
+    Extension(
+        "cymbal.inputs.sbus_decoder",
+        ["cymbal/inputs/sbus_decoder.pyx"],
+    ),
+    Extension(
+        "cymbal.inputs.sbus_reader",
+        ["cymbal/inputs/sbus_reader.pyx"],
+    ),
 ]
 
 setup(
     name="cymbal",
-    version="0.2.0",
+    version="0.3.0",
     author="gtraines",
     description="Control software for dual gimbals on fixed-wing drones (Cython optimized)",
     long_description=long_description,

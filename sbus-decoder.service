@@ -1,0 +1,27 @@
+[Unit]
+Description=S-BUS RC Signal Decoder for Cymbal Gimbal System
+Documentation=file:/home/pi/cymbal/docs/SBUS.md
+After=pigpiod.service
+Requires=pigpiod.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/cymbal
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/usr/bin/python3 -m cymbal.inputs.sbus_service
+Restart=on-failure
+RestartSec=2s
+# Create /run/cymbal/ at service start so the socket path exists
+RuntimeDirectory=cymbal
+RuntimeDirectoryMode=0755
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
