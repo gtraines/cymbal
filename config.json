@@ -11,5 +11,46 @@
     "i2c_bus": 1,
     "use_stabilization": true
   },
+  "gps": {
+    "port": "/dev/ttyUSB0",
+    "baudrate": 9600,
+    "update_rate_hz": 5,
+    "terrain_db_path": "/opt/cymbal/srtm",
+    "use_terrain_db": true,
+    "min_fix_quality": 1
+  },
+  "geo": {
+    "address_db_path": "/opt/cymbal/addresses.db",
+    "search_radius_deg": 0.01,
+    "enabled": true
+  },
+  "osd": {
+    "enabled": true,
+    "font_scale": 0.6,
+    "font_thickness": 1,
+    "text_color": [255, 255, 255],
+    "background_color": [0, 0, 0],
+    "background_alpha": 0.5,
+    "show_sbus_channels": false
+  },
+  "sbus": {
+    "gpio_pin": 4,
+    "socket_path": "/run/cymbal/sbus.sock",
+    "failsafe_action": "center",
+    "frame_timeout_ms": 100,
+    "enabled": true
+  },
+  "channel_map": {
+    "camera_pitch": 6,
+    "camera_yaw": 7,
+    "spotlight_pitch": 8,
+    "spotlight_yaw": 9,
+    "mode_select": 5,
+    "poi_lock": 10,
+    "camera_pitch_range": [-90.0, 30.0],
+    "camera_yaw_range": [-90.0, 90.0],
+    "spotlight_pitch_range": [-90.0, 30.0],
+    "spotlight_yaw_range": [-180.0, 180.0]
+  },
   "log_level": "INFO"
 }
