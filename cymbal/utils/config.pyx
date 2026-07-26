@@ -55,6 +55,8 @@ class OSDConfig:
     background_color: List[int] = field(default_factory=lambda: [0, 0, 0])
     background_alpha: float = 0.5
     show_sbus_channels: bool = False
+    show_compass: bool = True
+    compass_radius: int = 45
 
 
 @dataclass

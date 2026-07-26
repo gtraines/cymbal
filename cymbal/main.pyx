@@ -78,6 +78,7 @@ cdef class GimbalController:
     # Cached telemetry (read by OSD / status)
     cdef public str current_address
     cdef public int current_mode
+    cdef public double _last_camera_yaw   # degrees from nose; NaN until first command
 
     def __init__(self, config: SystemConfig):
         self.config = config
@@ -98,6 +99,7 @@ cdef class GimbalController:
         self.poi_lon         = 0.0
         self.current_address = "No fix"
         self.current_mode    = MODE_MANUAL
+        self._last_camera_yaw = float('nan')
 
         signal.signal(signal.SIGINT,  self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -334,6 +336,7 @@ cdef class GimbalController:
         """Dispatch gimbal commands based on the current operating mode."""
         cdef int mode = MODE_MANUAL
         cdef dict cmds
+        cdef double poi_pitch, poi_yaw
 
         if self.channel_mapper is not None and self.sbus is not None:
             mode = self.channel_mapper.get_mode_index(self.sbus)
@@ -346,14 +349,21 @@ cdef class GimbalController:
                     cmds['camera_pitch'], 0.0, cmds['camera_yaw'])
                 self.set_spotlight_position(
                     cmds['spotlight_pitch'], cmds['spotlight_yaw'])
+                self._last_camera_yaw = cmds['camera_yaw']
 
         elif mode == MODE_TRACK:
             if (self.poi_locked and self.gps is not None and self.gps.has_fix
                     and not isnan(self.gps.altitude_agl)):
-                pitch, yaw = self._compute_poi_angles(
+                poi_pitch, poi_yaw = self._compute_poi_angles(
                     self.gps.latitude, self.gps.longitude, self.gps.altitude_agl,
                     self.poi_lat, self.poi_lon)
-                self.sync_gimbals(pitch, yaw)
+                self.sync_gimbals(poi_pitch, poi_yaw)
+                # In TRACK mode the camera yaw is the absolute bearing offset
+                # from the aircraft nose = poi_yaw - gps.track_degrees
+                if not isnan(self.gps.track_degrees):
+                    self._last_camera_yaw = poi_yaw - self.gps.track_degrees
+                else:
+                    self._last_camera_yaw = poi_yaw
 
         elif mode == MODE_STABILIZE:
             if self.spotlight_gimbal is not None:
@@ -361,11 +371,13 @@ cdef class GimbalController:
                     self.spotlight_gimbal.stabilize()
                 except Exception:
                     pass
+            # In stabilize mode, camera yaw stays at last known value
 
     cdef void _apply_failsafe(self):
         """Center all gimbals immediately on S-BUS failsafe."""
         self.logger.warning("S-BUS failsafe active — centering gimbals")
         self.center_all()
+        self._last_camera_yaw = 0.0
 
     # ------------------------------------------------------------------
     # POI tracking math
@@ -423,23 +435,26 @@ cdef class GimbalController:
     # ------------------------------------------------------------------
 
     cdef void _update_osd(self):
-        cdef double lat, lon, alt_agl, gs
+        cdef double lat, lon, alt_agl, gs, track_deg, cam_yaw
         cdef int fix_q, sats, i
 
-        lat     = 0.0
-        lon     = 0.0
-        alt_agl = float('nan')
-        gs      = float('nan')
-        fix_q   = 0
-        sats    = 0
+        lat      = 0.0
+        lon      = 0.0
+        alt_agl  = float('nan')
+        gs       = float('nan')
+        track_deg = float('nan')
+        cam_yaw  = self._last_camera_yaw
+        fix_q    = 0
+        sats     = 0
 
         if self.gps is not None:
-            lat     = self.gps.latitude
-            lon     = self.gps.longitude
-            alt_agl = self.gps.altitude_agl
-            gs      = self.gps.groundspeed_ms
-            fix_q   = self.gps.fix_quality
-            sats    = self.gps.satellites
+            lat       = self.gps.latitude
+            lon       = self.gps.longitude
+            alt_agl   = self.gps.altitude_agl
+            gs        = self.gps.groundspeed_ms
+            fix_q     = self.gps.fix_quality
+            sats      = self.gps.satellites
+            track_deg = self.gps.track_degrees
 
         # Convert C int[18] array to Python list for OSD display
         sbus_ch = []
@@ -447,8 +462,11 @@ cdef class GimbalController:
             for i in range(18):
                 sbus_ch.append(self.sbus.channels[i])
 
-        self.osd.update_telemetry(lat, lon, alt_agl, gs,
-                                  self.current_address, fix_q, sats, sbus_ch)
+        self.osd.update_telemetry(
+            lat, lon, alt_agl, gs,
+            self.current_address, fix_q, sats, sbus_ch,
+            track_deg, cam_yaw,
+        )
 
     # ------------------------------------------------------------------
     # Status and telemetry accessors

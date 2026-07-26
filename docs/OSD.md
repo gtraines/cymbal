@@ -12,8 +12,10 @@ via `picamera2`, or pre-recorded test frames).
 
 ## What the OSD displays
 
-Each rendered frame shows a semi-transparent overlay box in the top-left corner
-containing:
+Each rendered frame shows a **text overlay box** in the top-left corner and a
+**compass widget** in the top-right corner.
+
+### Text overlay box
 
 | Row | Content | Example |
 |---|---|---|
@@ -27,6 +29,36 @@ containing:
 
 When GPS has no fix, position and altitude rows show `--`.
 
+### Compass widget
+
+A small circle drawn in the **top-right corner** of the frame with two directional
+arrows and a north reference:
+
+```
+        N
+       ┆        ← thin tick marks at N/E/S/W
+   W ──○── E    ← compass ring (dims when no GPS fix)
+       ┆
+        S
+
+ ←white arrow→  aircraft travel direction (GPS ground track)
+ ←yellow arrow→ camera aim direction in yaw (absolute geographic)
+
+ Trk: 045.0°    (white text, below ring)
+ Cam: +030.0°   (yellow text, offset from aircraft nose)
+```
+
+| Element | Colour | Meaning |
+|---|---|---|
+| White arrow | White | GPS ground track — where the aircraft is flying geographically |
+| Yellow arrow | Yellow | Absolute camera yaw direction = ground track + camera yaw offset |
+| Ring | Bright grey | Compass ring; dims to dark grey when GPS fix is unavailable |
+| `Trk:` label | White | Ground track in degrees from north, clockwise (0–360) |
+| `Cam:` label | Yellow | Camera yaw relative to aircraft nose (+° = right, −° = left) |
+
+The compass is **north-up** (standard aviation convention). Both arrows are suppressed
+when the relevant value is unavailable (no GPS fix, or no gimbal command sent yet).
+
 ## Configuration
 
 OSD settings live under the `osd` key in `/etc/cymbal/config.json`:
@@ -39,7 +71,9 @@ OSD settings live under the `osd` key in `/etc/cymbal/config.json`:
   "text_color":        [255, 255, 255],
   "background_color":  [0, 0, 0],
   "background_alpha":  0.5,
-  "show_sbus_channels": false
+  "show_sbus_channels": false,
+  "show_compass":      true,
+  "compass_radius":    45
 }
 ```
 
@@ -52,6 +86,8 @@ OSD settings live under the `osd` key in `/etc/cymbal/config.json`:
 | `background_color` | [R,G,B] | `[0,0,0]` | Background box colour (black) |
 | `background_alpha` | float | `0.5` | Background opacity 0.0 (transparent) to 1.0 (solid) |
 | `show_sbus_channels` | bool | `false` | Show raw SBUS channel values for debugging |
+| `show_compass` | bool | `true` | Show the compass widget in the top-right corner |
+| `compass_radius` | int | `45` | Radius of the compass ring in pixels (default fits 640×480) |
 
 > **Note:** OpenCV uses BGR channel ordering internally.  The config accepts RGB
 > for readability; the module converts to BGR automatically when drawing.

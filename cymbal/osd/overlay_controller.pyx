@@ -12,10 +12,19 @@ Library choice: OpenCV (cv2) drawing primitives.
   - Alternatives (pygame, PIL) would add a separate dependency and a heavier
     rendering pipeline; cv2 keeps everything in one library.
 
+Compass widget:
+  A small circle rendered in the top-right corner of the frame shows:
+  - White arrow: aircraft travel direction (GPS ground track, north-up).
+  - Yellow arrow: absolute camera aim direction (track + camera yaw).
+  - "N" label and cardinal tick marks on the ring.
+  - Text labels Trk/Cam below the ring.
+
 Usage:
     osd = OSDOverlay(config.osd)
     osd.initialize()
-    osd.update_telemetry(lat, lon, alt_agl, groundspeed, address, ...)
+    osd.update_telemetry(lat, lon, alt_agl, groundspeed, address,
+                         fix_quality, satellites, sbus_channels,
+                         track_degrees, camera_yaw_deg)
     # In camera loop:
     osd.render_frame(frame)   # annotates frame in-place
     osd.close()
@@ -36,6 +45,8 @@ logger = logging.getLogger(__name__)
 
 # OpenCV font
 _FONT = None  # set in initialize() once cv2 is available
+
+_NAN = float('nan')
 
 
 cdef class OSDOverlay:
@@ -59,15 +70,19 @@ cdef class OSDOverlay:
         self._bg_color = (0, 0, 0)
         self.background_alpha = 0.5
         self.show_sbus_channels = False
+        self.show_compass = True
+        self.compass_radius = 45
 
-        self.lat = float('nan')
-        self.lon = float('nan')
-        self.alt_agl = float('nan')
-        self.groundspeed_ms = float('nan')
+        self.lat = _NAN
+        self.lon = _NAN
+        self.alt_agl = _NAN
+        self.groundspeed_ms = _NAN
         self.address = "No fix"
         self.fix_quality = 0
         self.satellites = 0
         self.sbus_channels = []
+        self.track_degrees = _NAN
+        self.camera_yaw_deg = _NAN
 
         if config is not None:
             self._apply_config(config)
@@ -80,6 +95,8 @@ cdef class OSDOverlay:
         self._bg_color = tuple(config.background_color)
         self.background_alpha = config.background_alpha
         self.show_sbus_channels = config.show_sbus_channels
+        self.show_compass = config.show_compass
+        self.compass_radius = config.compass_radius
 
     cpdef bint initialize(self):
         """
@@ -100,19 +117,24 @@ cdef class OSDOverlay:
     cpdef void update_telemetry(self, double lat, double lon, double alt_agl,
                                 double groundspeed, str address,
                                 int fix_quality, int satellites,
-                                object sbus_channels):
+                                object sbus_channels,
+                                double track_degrees,
+                                double camera_yaw_deg):
         """
         Cache the latest telemetry for the next render_frame() call.
 
         Args:
-            lat:          Latitude in decimal degrees (NaN if no fix).
-            lon:          Longitude in decimal degrees (NaN if no fix).
-            alt_agl:      Altitude above ground level in meters (NaN if unknown).
-            groundspeed:  Ground speed in m/s (NaN if unknown).
-            address:      Nearest street address string.
-            fix_quality:  GPS fix quality (0=none, 1=GPS, 2=DGPS).
-            satellites:   Number of satellites in use.
+            lat:           Latitude in decimal degrees (NaN if no fix).
+            lon:           Longitude in decimal degrees (NaN if no fix).
+            alt_agl:       Altitude above ground level in meters (NaN if unknown).
+            groundspeed:   Ground speed in m/s (NaN if unknown).
+            address:       Nearest street address string.
+            fix_quality:   GPS fix quality (0=none, 1=GPS, 2=DGPS).
+            satellites:    Number of satellites in use.
             sbus_channels: Sequence of 18 raw SBUS channel values for debug display.
+            track_degrees: GPS ground track in degrees from north, clockwise (NaN if unknown).
+            camera_yaw_deg: Camera yaw offset from aircraft nose in degrees
+                            (positive = right, negative = left; NaN if unknown).
         """
         self.lat = lat
         self.lon = lon
@@ -122,6 +144,8 @@ cdef class OSDOverlay:
         self.fix_quality = fix_quality
         self.satellites = satellites
         self.sbus_channels = sbus_channels
+        self.track_degrees = track_degrees
+        self.camera_yaw_deg = camera_yaw_deg
 
     cpdef void render_frame(self, object frame):
         """
@@ -132,14 +156,26 @@ cdef class OSDOverlay:
                    If None, this method returns immediately.
         """
         cdef list lines
-        cdef int x = 10
-        cdef int y = 30
+        cdef int x, y, fh, fw, cx, cy
 
         if not self.enabled or cv2 is None or frame is None:
             return
 
+        x = 10
+        y = 30
         lines = self._build_lines()
         self._draw_text_box(frame, lines, x, y)
+
+        if self.show_compass:
+            fh, fw = frame.shape[:2]
+            cx = fw - self.compass_radius - 15
+            cy = self.compass_radius + 15
+            self._draw_compass_widget(
+                frame, cx, cy,
+                self.compass_radius,
+                self.track_degrees,
+                self.camera_yaw_deg,
+            )
 
     def _build_lines(self):
         """Assemble the list of text lines to display."""
@@ -240,6 +276,120 @@ cdef class OSDOverlay:
             )
             ty += lh
 
+    cdef void _draw_compass_widget(self, object frame, int cx, int cy,
+                                   int radius, double track_deg,
+                                   double camera_yaw_deg):
+        """
+        Draw the compass widget: a ring with aircraft-track and camera-aim arrows.
+
+        The compass is north-up (geographic).
+        - White arrow: GPS ground track (where the aircraft is flying).
+        - Yellow arrow: absolute camera aim direction (track + camera_yaw_deg).
+        Both arrows are suppressed when the relevant value is NaN.
+
+        Args:
+            frame:          BGR numpy frame (modified in-place).
+            cx, cy:         Centre pixel of the compass circle.
+            radius:         Outer radius of the compass ring in pixels.
+            track_deg:      GPS ground track (degrees from north, clockwise).
+                            NaN → white arrow suppressed, ring dims.
+            camera_yaw_deg: Camera yaw offset from nose (degrees, + = right).
+                            NaN → yellow arrow suppressed.
+        """
+        cdef double pi = math.pi
+        cdef double track_rad, cam_abs_rad
+        cdef int ax, ay, cax, cay, ix, iy, ox, oy, tx, ty
+        cdef int inner_r, outer_r, arrow_len, cam_len
+        cdef bint have_track, have_cam
+        cdef object bg_overlay
+        cdef double card_rad
+        cdef int i
+
+        have_track = not math.isnan(track_deg)
+        have_cam   = have_track and not math.isnan(camera_yaw_deg)
+
+        # ------------------------------------------------------------------
+        # Semi-transparent background disc
+        # ------------------------------------------------------------------
+        bg_overlay = frame.copy()
+        cv2.circle(bg_overlay, (cx, cy), radius + 12, (0, 0, 0), -1)
+        cv2.addWeighted(bg_overlay, 0.55, frame, 0.45, 0, frame)
+
+        # ------------------------------------------------------------------
+        # Compass ring colour: bright when we have a fix, dimmed otherwise
+        # ------------------------------------------------------------------
+        ring_color = (180, 180, 180) if have_track else (80, 80, 80)
+        cv2.circle(frame, (cx, cy), radius, ring_color, 1, cv2.LINE_AA)
+
+        # ------------------------------------------------------------------
+        # Cardinal tick marks (N / E / S / W)  and "N" label
+        # ------------------------------------------------------------------
+        cardinal_angles = [0.0, 90.0, 180.0, 270.0]
+        cardinal_labels = ["N", None, None, None]
+
+        for i in range(4):
+            card_rad = cardinal_angles[i] * pi / 180.0
+            s = math.sin(card_rad)
+            c = math.cos(card_rad)
+            inner_r = radius - 5
+            outer_r = radius
+            ix = int(cx + inner_r * s)
+            iy = int(cy - inner_r * c)
+            ox = int(cx + outer_r * s)
+            oy = int(cy - outer_r * c)
+            cv2.line(frame, (ix, iy), (ox, oy), ring_color, 2, cv2.LINE_AA)
+
+            if cardinal_labels[i] is not None:
+                tx = int(cx + (outer_r + 8) * s) - 4
+                ty = int(cy - (outer_r + 8) * c) + 4
+                cv2.putText(frame, "N", (tx, ty),
+                            _FONT, 0.38, ring_color, 1, cv2.LINE_AA)
+
+        # ------------------------------------------------------------------
+        # Aircraft travel direction arrow  (white)
+        # ------------------------------------------------------------------
+        if have_track:
+            track_rad = track_deg * pi / 180.0
+            arrow_len = int(radius * 0.82)
+            ax = int(cx + arrow_len * math.sin(track_rad))
+            ay = int(cy - arrow_len * math.cos(track_rad))
+            cv2.arrowedLine(
+                frame, (cx, cy), (ax, ay),
+                (255, 255, 255), 2, cv2.LINE_AA, tipLength=0.28,
+            )
+
+        # ------------------------------------------------------------------
+        # Camera aim direction arrow  (yellow = (0, 255, 255) in BGR)
+        # ------------------------------------------------------------------
+        if have_cam:
+            cam_abs_deg = track_deg + camera_yaw_deg
+            cam_abs_rad = cam_abs_deg * pi / 180.0
+            cam_len = int(radius * 0.62)
+            cax = int(cx + cam_len * math.sin(cam_abs_rad))
+            cay = int(cy - cam_len * math.cos(cam_abs_rad))
+            cv2.arrowedLine(
+                frame, (cx, cy), (cax, cay),
+                (0, 255, 255), 2, cv2.LINE_AA, tipLength=0.33,
+            )
+
+        # ------------------------------------------------------------------
+        # Text labels below the ring
+        # ------------------------------------------------------------------
+        label_y = cy + radius + 16
+        label_x = cx - radius
+
+        if have_track:
+            trk_str = f"Trk:{track_deg:05.1f}"
+            cv2.putText(frame, trk_str, (label_x, label_y),
+                        _FONT, 0.40, (255, 255, 255), 1, cv2.LINE_AA)
+            label_y += 16
+
+        if have_cam:
+            sign = "+" if camera_yaw_deg >= 0 else ""
+            cam_str = f"Cam:{sign}{camera_yaw_deg:05.1f}"
+            cv2.putText(frame, cam_str, (label_x, label_y),
+                        _FONT, 0.40, (0, 255, 255), 1, cv2.LINE_AA)
+
     cpdef void close(self):
         """Release OSD resources."""
         logger.debug("OSDOverlay closed")
@@ -249,3 +399,4 @@ cdef class OSDOverlay:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+

@@ -87,7 +87,9 @@ See [GPS.md](GPS.md) for terrain tile download instructions.
   "text_color": [255, 255, 255],
   "background_color": [0, 0, 0],
   "background_alpha": 0.5,
-  "show_sbus_channels": false
+  "show_sbus_channels": false,
+  "show_compass": true,
+  "compass_radius": 45
 }
 ```
 
