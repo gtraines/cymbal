@@ -1,7 +1,7 @@
 [Unit]
 Description=Cython Cymbal Airborne Gimbal Control System
-After=network.target pigpiod.service
-Requires=pigpiod.service
+After=network.target pigpiod.service sbus-decoder.service
+Requires=pigpiod.service sbus-decoder.service
 
 [Service]
 Type=simple

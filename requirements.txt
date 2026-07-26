@@ -3,7 +3,7 @@
 # Cython for compiled extensions
 Cython>=0.29.0
 
-# Serial communication for Storm32bgc
+# Serial communication for Storm32bgc and GPS
 pyserial>=3.5
 
 # I2C communication for MPU6050
@@ -11,6 +11,15 @@ smbus2>=0.4.2
 
 # GPIO control for servos (Raspberry Pi)
 pigpio>=1.78
+
+# NMEA-0183 GPS sentence parsing
+pynmea2>=1.18.0
+
+# Offline SRTM terrain elevation tiles
+srtm.py>=0.3.5
+
+# OpenCV for OSD frame annotation (headless: no GUI dependencies)
+opencv-python-headless>=4.5.0
 
 # Optional: MAVLink protocol support for Storm32
 # pymavlink>=2.4.37
