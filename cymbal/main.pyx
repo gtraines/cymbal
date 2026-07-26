@@ -423,21 +423,29 @@ cdef class GimbalController:
     # ------------------------------------------------------------------
 
     cdef void _update_osd(self):
-        cdef double lat = 0.0, lon = 0.0, alt_agl = float('nan')
-        cdef double gs = float('nan')
-        cdef int fix_q = 0, sats = 0
+        cdef double lat, lon, alt_agl, gs
+        cdef int fix_q, sats, i
+
+        lat     = 0.0
+        lon     = 0.0
+        alt_agl = float('nan')
+        gs      = float('nan')
+        fix_q   = 0
+        sats    = 0
 
         if self.gps is not None:
-            lat    = self.gps.latitude
-            lon    = self.gps.longitude
+            lat     = self.gps.latitude
+            lon     = self.gps.longitude
             alt_agl = self.gps.altitude_agl
-            gs     = self.gps.groundspeed_ms
-            fix_q  = self.gps.fix_quality
-            sats   = self.gps.satellites
+            gs      = self.gps.groundspeed_ms
+            fix_q   = self.gps.fix_quality
+            sats    = self.gps.satellites
 
+        # Convert C int[18] array to Python list for OSD display
         sbus_ch = []
         if self.sbus is not None:
-            sbus_ch = list(self.sbus.channels[:18])
+            for i in range(18):
+                sbus_ch.append(self.sbus.channels[i])
 
         self.osd.update_telemetry(lat, lon, alt_agl, gs,
                                   self.current_address, fix_q, sats, sbus_ch)
@@ -454,7 +462,8 @@ cdef class GimbalController:
             (latitude, longitude, altitude_msl, altitude_agl) as floats,
             or all NaN if GPS is unavailable or has no fix.
         """
-        cdef double nan = float('nan')
+        cdef double nan
+        nan = float('nan')
         if self.gps is None or not self.gps.has_fix:
             return (nan, nan, nan, nan)
         return (self.gps.latitude, self.gps.longitude,

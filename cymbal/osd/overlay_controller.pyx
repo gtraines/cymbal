@@ -131,12 +131,14 @@ cdef class OSDOverlay:
             frame: A numpy ndarray (H × W × 3, uint8, BGR) from a camera.
                    If None, this method returns immediately.
         """
+        cdef list lines
+        cdef int x = 10
+        cdef int y = 30
+
         if not self.enabled or cv2 is None or frame is None:
             return
 
-        cdef list lines = self._build_lines()
-        cdef int x = 10
-        cdef int y = 30
+        lines = self._build_lines()
         self._draw_text_box(frame, lines, x, y)
 
     def _build_lines(self):
@@ -184,10 +186,11 @@ cdef class OSDOverlay:
 
     cdef void _draw_text_box(self, object frame, list lines, int x, int y):
         """Draw a semi-transparent background box and then render text lines."""
-        cdef int line_height, total_height, max_width, w, h
-        cdef int pad = 6
-        cdef int lh = int(28 * self.font_scale)
+        cdef int max_width, w, h, total_height, pad, lh, bx1, by1, bx2, by2, fh, fw, ty
         cdef object overlay
+
+        pad = 6
+        lh = int(28 * self.font_scale)
 
         # Measure the widest line
         max_width = 0
@@ -224,7 +227,7 @@ cdef class OSDOverlay:
         )
 
         # Text lines
-        cdef int ty = y
+        ty = y
         for line in lines:
             cv2.putText(
                 frame, line,

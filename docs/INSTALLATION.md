@@ -26,8 +26,11 @@ sudo apt-get install -y python3-pip python3-dev python3-setuptools
 # Install I2C tools for MPU6050
 sudo apt-get install -y i2c-tools libi2c-dev
 
-# Install pigpio for GPIO/PWM control
+# Install pigpio for GPIO/PWM and S-BUS bit-bang serial
 sudo apt-get install -y pigpio python3-pigpio
+
+# Install build tools for Cython extensions
+sudo apt-get install -y build-essential
 
 # Enable and start pigpio daemon
 sudo systemctl enable pigpiod
@@ -116,12 +119,12 @@ Log out and log back in for group changes to take effect.
 
 ### 8. Configuration
 
-Create configuration directory:
+Create configuration directory and data directories:
 
 ```bash
-sudo mkdir -p /etc/cymbal
+sudo mkdir -p /etc/cymbal /opt/cymbal/srtm
 sudo cp config.json /etc/cymbal/config.json
-sudo chown -R $USER:$USER /etc/cymbal
+sudo chown -R pi:pi /etc/cymbal /opt/cymbal
 ```
 
 Edit configuration as needed:
@@ -130,7 +133,34 @@ Edit configuration as needed:
 nano /etc/cymbal/config.json
 ```
 
-### 9. Test Installation
+See [docs/CONFIGURATION.md](CONFIGURATION.md) for a full reference.
+
+### 8a. Build the Address Database (optional, for reverse geocoding)
+
+```bash
+# Download OpenAddresses data for your area from https://batch.openaddresses.io
+# Then build the local SQLite database:
+python3 tools/load_openaddresses.py \
+    --input /path/to/openaddresses-us-az.csv \
+    --output /opt/cymbal/addresses.db \
+    --bbox 33.3,33.55,-111.95,-111.60
+```
+
+See [docs/OSD.md](OSD.md) for details.
+
+### 8b. Download SRTM Terrain Tiles (optional, for AGL altitude)
+
+Pre-download tiles on a machine with internet access, then copy to the Pi.
+See [docs/GPS.md](GPS.md) for instructions.
+
+### 9. Install Systemd Services
+
+```bash
+sudo cp sbus-decoder.service /etc/systemd/system/
+sudo cp cymbal.service       /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable sbus-decoder cymbal
+```
 
 Test basic imports:
 
