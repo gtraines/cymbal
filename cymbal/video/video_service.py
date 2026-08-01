@@ -198,7 +198,7 @@ class VideoService:
     def _init_osd(self):
         """Create OSDOverlay with the appropriate video sink."""
         try:
-            from cymbal.utils.config import OSDConfig
+            from cymbal.config.config import OSDConfig
 
             class _OSDCfg:
                 def __init__(self, d):

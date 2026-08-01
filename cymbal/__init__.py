@@ -8,7 +8,7 @@ Stable public exports — import what you need::
     from cymbal.controller import CymbalController
     from cymbal.gimbals import GimbalBase, Storm32GimbalAdapter, ServoGimbalAdapter
     from cymbal.video import VideoSink, HeadlessSink, DisplaySink
-    from cymbal.utils.config import SystemConfig
+    from cymbal.config.config import SystemConfig
 
 Legacy imports (still supported)::
 

@@ -33,7 +33,7 @@ from cymbal.gimbals.servo_adapter cimport ServoGimbalAdapter
 # simplebgc_stub extension is optional and may not be compiled on all targets.
 from cymbal.controller.cymbal_controller import CymbalController, GimbalController  # noqa: F401
 from cymbal.controller.telemetry_provider import InProcessTelemetryProvider as _InProcessPy
-from cymbal.utils.config import SystemConfig
+from cymbal.config.config import SystemConfig
 from cymbal.gimbals.storm32_adapter import Storm32GimbalAdapter as _Storm32Py
 from cymbal.gimbals.servo_adapter import ServoGimbalAdapter as _ServoPy
 

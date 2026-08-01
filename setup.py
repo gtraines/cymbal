@@ -28,8 +28,8 @@ extensions = [
         ["cymbal/spotlight_gimbal/servo_controller.pyx"],
     ),
     Extension(
-        "cymbal.utils.config",
-        ["cymbal/utils/config.pyx"],
+        "cymbal.config.config",
+        ["cymbal/config/config.pyx"],
     ),
     Extension(
         "cymbal.main",

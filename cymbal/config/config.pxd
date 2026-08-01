@@ -1,5 +1,5 @@
 """
-Cython header file for cymbal.utils.config.
+Cython header file for cymbal.config.config.
 
 IMPORTANT — all config types (SystemConfig, GPSConfig, OSDConfig, etc.) are
 Python *dataclasses*, not Cython extension types (cdef class).  A Cython .pxd
@@ -9,7 +9,7 @@ dataclass semantics (field defaults, from_dict, asdict, etc.).
 
 What this file IS useful for:
   - Documents that config.pyx exports no cdef-level symbols.
-  - Acts as a placeholder so that ``from cymbal.utils.config cimport ...``
+  - Acts as a placeholder so that ``from cymbal.config.config cimport ...``
     syntax gives a clear compile error rather than a silent fallback when
     someone attempts to use Cython typing for config objects.
   - Tracks future work: if individual sub-configs (e.g. SBUSConfig, OSDConfig)
@@ -17,7 +17,7 @@ What this file IS useful for:
     their declarations belong here.
 
 Callers that need config objects should use the normal Python import:
-    from cymbal.utils.config import SystemConfig
+    from cymbal.config.config import SystemConfig
 
 There is no cdef typing available for these types at this time.
 """

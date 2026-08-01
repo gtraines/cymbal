@@ -20,7 +20,7 @@ import time
 
 from cymbal.gimbals import Storm32GimbalAdapter, ServoGimbalAdapter
 from cymbal.controller import CymbalController
-from cymbal.utils.config import SystemConfig
+from cymbal.config.config import SystemConfig
 
 logging.basicConfig(
     level=logging.INFO,

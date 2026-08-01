@@ -28,7 +28,7 @@ import sys
 
 # ── New library API ──────────────────────────────────────────────────────────
 from cymbal.gimbals import SimpleBGCGimbalAdapter
-from cymbal.utils.config import (
+from cymbal.config.config import (
     SystemConfig, GimbalDef, AxisConfig, VideoOutputConfig,
 )
 

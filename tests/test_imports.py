@@ -27,7 +27,7 @@ class TestImports(unittest.TestCase):
     
     def test_import_config(self):
         """Test importing configuration classes."""
-        from cymbal.utils.config import SystemConfig
+        from cymbal.config.config import SystemConfig
         self.assertIsNotNone(SystemConfig)
     
     def test_import_main(self):

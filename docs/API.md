@@ -495,7 +495,7 @@ with MPU6050() as mpu:
 ## Complete Example
 
 ```python
-from cymbal.utils.config import SystemConfig
+from cymbal.config.config import SystemConfig
 from cymbal.main import GimbalController
 
 # Load configuration

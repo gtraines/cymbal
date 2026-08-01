@@ -7,7 +7,7 @@ This script demonstrates coordinated control of camera and spotlight gimbals.
 
 import time
 import sys
-from cymbal.utils.config import SystemConfig
+from cymbal.config.config import SystemConfig
 from cymbal.main import GimbalController
 
 

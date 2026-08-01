@@ -15,7 +15,7 @@ import sys
 import tempfile
 import os
 
-from cymbal.utils.config import SystemConfig
+from cymbal.config.config import SystemConfig
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s  %(levelname)s  %(message)s")

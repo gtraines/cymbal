@@ -11,7 +11,7 @@ import unittest
 class TestSystemConfigNewSections(unittest.TestCase):
 
     def test_default_config_has_gps_section(self):
-        from cymbal.utils.config import SystemConfig, GPSConfig
+        from cymbal.config.config import SystemConfig, GPSConfig
         cfg = SystemConfig.load('/nonexistent/path/config.json')
         self.assertIsInstance(cfg.gps, GPSConfig)
         self.assertEqual(cfg.gps.port, '/dev/ttyUSB0')
@@ -19,34 +19,34 @@ class TestSystemConfigNewSections(unittest.TestCase):
         self.assertTrue(cfg.gps.use_terrain_db)
 
     def test_default_config_has_geo_section(self):
-        from cymbal.utils.config import SystemConfig, GeoConfig
+        from cymbal.config.config import SystemConfig, GeoConfig
         cfg = SystemConfig.load('/nonexistent/path/config.json')
         self.assertIsInstance(cfg.geo, GeoConfig)
         self.assertTrue(cfg.geo.enabled)
 
     def test_default_config_has_osd_section(self):
-        from cymbal.utils.config import SystemConfig, OSDConfig
+        from cymbal.config.config import SystemConfig, OSDConfig
         cfg = SystemConfig.load('/nonexistent/path/config.json')
         self.assertIsInstance(cfg.osd, OSDConfig)
         self.assertTrue(cfg.osd.enabled)
         self.assertFalse(cfg.osd.show_sbus_channels)
 
     def test_default_config_has_sbus_section(self):
-        from cymbal.utils.config import SystemConfig, SBUSConfig
+        from cymbal.config.config import SystemConfig, SBUSConfig
         cfg = SystemConfig.load('/nonexistent/path/config.json')
         self.assertIsInstance(cfg.sbus, SBUSConfig)
         self.assertEqual(cfg.sbus.gpio_pin, 4)
         self.assertEqual(cfg.sbus.failsafe_action, 'center')
 
     def test_default_config_has_channel_map_section(self):
-        from cymbal.utils.config import SystemConfig, ChannelMapConfig
+        from cymbal.config.config import SystemConfig, ChannelMapConfig
         cfg = SystemConfig.load('/nonexistent/path/config.json')
         self.assertIsInstance(cfg.channel_map, ChannelMapConfig)
         self.assertEqual(cfg.channel_map.camera_pitch, 6)
         self.assertEqual(cfg.channel_map.mode_select, 5)
 
     def test_round_trip_json_preserves_new_sections(self):
-        from cymbal.utils.config import SystemConfig
+        from cymbal.config.config import SystemConfig
         cfg = SystemConfig.load('/nonexistent/path/config.json')
         cfg.gps.port = '/dev/ttyUSB1'
         cfg.geo.enabled = False
@@ -58,7 +58,7 @@ class TestSystemConfigNewSections(unittest.TestCase):
         self.assertEqual(d['sbus']['gpio_pin'], 18)
 
     def test_load_from_json_file_parses_new_sections(self):
-        from cymbal.utils.config import SystemConfig
+        from cymbal.config.config import SystemConfig
 
         data = {
             "camera_gimbal": {"serial_port": "/dev/ttyAMA0", "baudrate": 115200, "timeout": 1.0},

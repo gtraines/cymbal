@@ -23,7 +23,7 @@ import time
 
 from cymbal.gimbals import ServoGimbalAdapter
 from cymbal.controller import CymbalController
-from cymbal.utils.config import (
+from cymbal.config.config import (
     SystemConfig, GimbalDef, AxisConfig, VideoOutputConfig,
 )
 

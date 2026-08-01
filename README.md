@@ -247,7 +247,7 @@ controller.close()
 ### GimbalController (Main System)
 
 ```python
-from cymbal.utils.config import SystemConfig
+from cymbal.config.config import SystemConfig
 from cymbal.main import GimbalController
 
 config = SystemConfig.load('config.json')
