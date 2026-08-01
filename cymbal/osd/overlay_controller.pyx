@@ -74,6 +74,10 @@ cdef class OSDOverlay:
         self.show_sbus_channels = False
         self.show_compass = True
         self.compass_radius = 45
+        self.show_heading_tape = True
+        self.heading_tape_height_pct = 0.07
+        self.heading_tape_width_pct = 0.25
+        self.heading_tape_fov_deg = 30.0
 
         self._video_sink = None
         self._time_fn = time_fn if time_fn is not None else datetime.datetime.utcnow
@@ -102,6 +106,10 @@ cdef class OSDOverlay:
         self.show_sbus_channels = config.show_sbus_channels
         self.show_compass = config.show_compass
         self.compass_radius = config.compass_radius
+        self.show_heading_tape = config.show_heading_tape
+        self.heading_tape_height_pct = config.heading_tape_height_pct
+        self.heading_tape_width_pct = config.heading_tape_width_pct
+        self.heading_tape_fov_deg = config.heading_tape_fov_deg
 
     cpdef bint initialize(self, object video_sink=None):
         """
@@ -177,6 +185,7 @@ cdef class OSDOverlay:
         """
         cdef list lines
         cdef int x, y, fh, fw, cx, cy
+        cdef double camera_heading
 
         if not self.enabled or cv2 is None or frame is None:
             return
@@ -196,6 +205,16 @@ cdef class OSDOverlay:
                 self.track_degrees,
                 self.camera_yaw_deg,
             )
+
+        # Draw heading tape if enabled and data available
+        if self.show_heading_tape:
+            # Compute absolute camera heading from track + yaw
+            camera_heading = _NAN
+            if not math.isnan(self.track_degrees) and not math.isnan(self.camera_yaw_deg):
+                camera_heading = (self.track_degrees + self.camera_yaw_deg) % 360.0
+            
+            if not math.isnan(camera_heading):
+                self._draw_heading_tape(frame, camera_heading)
 
         # Forward to the attached video sink (HeadlessSink by default)
         if self._video_sink is not None:
@@ -413,6 +432,159 @@ cdef class OSDOverlay:
             cam_str = f"Cam:{sign}{camera_yaw_deg:05.1f}"
             cv2.putText(frame, cam_str, (label_x, label_y),
                         _FONT, 0.40, (0, 255, 255), 1, cv2.LINE_AA)
+
+    cdef void _draw_heading_tape(self, object frame, double camera_heading_deg):
+        """
+        Draw horizontal scrolling heading tape at top center.
+        
+        Shows camera absolute heading with ±15° field of view (configurable).
+        Displays tick marks, numerical labels, and cardinal directions.
+        
+        Args:
+            frame: BGR numpy array (H × W × 3)
+            camera_heading_deg: Absolute camera heading in degrees (0-360)
+        """
+        cdef int frame_height = frame.shape[0]
+        cdef int frame_width = frame.shape[1]
+        
+        # Calculate tape dimensions
+        cdef int tape_height = int(frame_height * self.heading_tape_height_pct)
+        cdef int tape_width = int(frame_width * self.heading_tape_width_pct)
+        cdef int tape_x = (frame_width - tape_width) // 2
+        cdef int tape_y = int(frame_height * 0.02)
+        
+        # Ensure minimum size
+        if tape_height < 20 or tape_width < 100:
+            return
+        
+        # Draw semi-transparent background
+        cdef object overlay = frame.copy()
+        cv2.rectangle(overlay, (tape_x, tape_y),
+                     (tape_x + tape_width, tape_y + tape_height),
+                     self._bg_color, -1)
+        cv2.addWeighted(overlay, self.background_alpha, frame, 1.0 - self.background_alpha,
+                       0, frame)
+        
+        # Draw border
+        cv2.rectangle(frame, (tape_x, tape_y),
+                     (tape_x + tape_width, tape_y + tape_height),
+                     self._text_color, 1)
+        
+        # Calculate degree range
+        cdef double half_fov = self.heading_tape_fov_deg / 2.0
+        cdef double degrees_per_pixel = self.heading_tape_fov_deg / float(tape_width)
+        cdef int tape_center_x = tape_x + tape_width // 2
+        
+        # Tick mark dimensions
+        cdef int tick_y_top = tape_y + 2
+        cdef int short_tick_height = 5
+        cdef int long_tick_height = 10
+        cdef int tick_y_short = tick_y_top + short_tick_height
+        cdef int tick_y_long = tick_y_top + long_tick_height
+        
+        # Draw tick marks and labels
+        cdef int deg
+        cdef double angular_offset
+        cdef int x_pos
+        cdef str label_text
+        cdef int text_width, text_height
+        cdef int text_x, text_y
+        cdef object text_size
+        cdef int baseline
+        
+        # Iterate through visible degree range
+        cdef int min_deg = int(camera_heading_deg - half_fov - 1)
+        cdef int max_deg = int(camera_heading_deg + half_fov + 2)
+        
+        for deg in range(min_deg, max_deg + 1):
+            # Normalize to 0-359
+            normalized_deg = deg % 360
+            
+            # Calculate angular offset from camera heading (shortest path)
+            angular_offset = normalized_deg - camera_heading_deg
+            if angular_offset > 180:
+                angular_offset -= 360
+            elif angular_offset < -180:
+                angular_offset += 360
+            
+            # Skip if outside visible range
+            if abs(angular_offset) > half_fov:
+                continue
+            
+            # Calculate x position
+            x_pos = int(tape_center_x + angular_offset / degrees_per_pixel)
+            
+            # Skip if outside tape bounds
+            if x_pos < tape_x or x_pos > tape_x + tape_width:
+                continue
+            
+            # Draw tick marks
+            if normalized_deg % 5 == 0:
+                # Long tick every 5 degrees
+                cv2.line(frame, (x_pos, tick_y_top), (x_pos, tick_y_long),
+                        self._text_color, 1)
+                
+                # Add numerical label
+                label_text = f"{normalized_deg:03d}"
+                text_size = cv2.getTextSize(label_text, _FONT, 0.35, 1)
+                text_width = text_size[0][0]
+                text_height = text_size[0][1]
+                text_x = x_pos - text_width // 2
+                text_y = tick_y_long + text_height + 2
+                
+                cv2.putText(frame, label_text, (text_x, text_y),
+                           _FONT, 0.35, self._text_color, 1, cv2.LINE_AA)
+                
+                # Add cardinal direction label if applicable
+                if normalized_deg == 0:
+                    cv2.putText(frame, "N", (x_pos - 4, text_y + 14),
+                               _FONT, 0.35, self._text_color, 1, cv2.LINE_AA)
+                elif normalized_deg == 90:
+                    cv2.putText(frame, "E", (x_pos - 3, text_y + 14),
+                               _FONT, 0.35, self._text_color, 1, cv2.LINE_AA)
+                elif normalized_deg == 180:
+                    cv2.putText(frame, "S", (x_pos - 3, text_y + 14),
+                               _FONT, 0.35, self._text_color, 1, cv2.LINE_AA)
+                elif normalized_deg == 270:
+                    cv2.putText(frame, "W", (x_pos - 5, text_y + 14),
+                               _FONT, 0.35, self._text_color, 1, cv2.LINE_AA)
+            else:
+                # Short tick every 1 degree
+                cv2.line(frame, (x_pos, tick_y_top), (x_pos, tick_y_short),
+                        self._text_color, 1)
+        
+        # Draw center chevron (downward pointing triangle)
+        cdef int chevron_size = 6
+        cdef int chevron_y = tape_y + tape_height - 2
+        cdef object chevron_pts = [[tape_center_x, chevron_y],
+                                   [tape_center_x - chevron_size, chevron_y - chevron_size],
+                                   [tape_center_x + chevron_size, chevron_y - chevron_size]]
+        import numpy as np
+        cv2.fillPoly(frame, [np.array(chevron_pts, dtype=np.int32)], self._text_color)
+        
+        # Draw center heading value box
+        cdef str heading_str = f"{int(camera_heading_deg) % 360:03d}\u00b0"
+        text_size = cv2.getTextSize(heading_str, _FONT, 0.45, 1)
+        cdef int box_width = text_size[0][0] + 8
+        cdef int box_height = text_size[0][1] + 6
+        cdef int box_x = tape_center_x - box_width // 2
+        cdef int box_y = tape_y + tape_height + 2
+        
+        # Draw box background
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (box_x, box_y),
+                     (box_x + box_width, box_y + box_height),
+                     self._bg_color, -1)
+        cv2.addWeighted(overlay, self.background_alpha, frame, 1.0 - self.background_alpha,
+                       0, frame)
+        
+        # Draw box border and text
+        cv2.rectangle(frame, (box_x, box_y),
+                     (box_x + box_width, box_y + box_height),
+                     self._text_color, 1)
+        cv2.putText(frame, heading_str,
+                   (box_x + 4, box_y + box_height - 3),
+                   _FONT, 0.45, self._text_color, 1, cv2.LINE_AA)
 
     cpdef void close(self):
         """Release OSD resources and close the attached video sink."""

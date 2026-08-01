@@ -12,6 +12,10 @@ cdef class OSDOverlay:
     cdef public bint show_sbus_channels
     cdef public bint show_compass
     cdef public int compass_radius
+    cdef public bint show_heading_tape
+    cdef public double heading_tape_height_pct
+    cdef public double heading_tape_width_pct
+    cdef public double heading_tape_fov_deg
 
     # Video sink (optional)
     cdef object _video_sink
@@ -44,3 +48,4 @@ cdef class OSDOverlay:
     cdef void _draw_compass_widget(self, object frame, int cx, int cy,
                                    int radius, double track_deg,
                                    double camera_yaw_deg)
+    cdef void _draw_heading_tape(self, object frame, double camera_heading_deg)

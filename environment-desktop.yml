@@ -1,0 +1,65 @@
+# Cymbal Airborne Gimbal Control System
+# Conda environment for development and deployment on Raspberry Pi 3B+
+#
+# Create:  conda env create -f environment.yml
+# Activate: conda activate cymbal
+# Update:   conda env update -f environment.yml --prune
+#
+# After activation, build the Cython extensions:
+#   python setup.py build_ext --inplace
+#   pip install -e .
+#
+# System prerequisites (Raspberry Pi OS):
+#   sudo apt-get install -y build-essential python3-dev i2c-tools pigpio
+#   sudo systemctl enable pigpiod && sudo systemctl start pigpiod
+#   sudo usermod -a -G dialout,gpio,i2c $USER
+
+name: cymbal-desktop-dev
+
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  # ── Runtime: Python ────────────────────────────────────────────────────────
+  # RPi OS Bullseye ships Python 3.9; Bookworm ships Python 3.11.
+  # Minimum 3.9 for full dataclass/typing support used in config.pyx.
+  - python>=3.9,<3.13
+
+  # ── Cython build toolchain ─────────────────────────────────────────────────
+  - cython>=0.29.0
+  - setuptools>=65
+  - wheel
+
+  # ── Core runtime dependencies (conda-forge) ────────────────────────────────
+  # Serial communication: Storm32bgc UART and USB GPS
+  - pyserial>=3.5
+
+  # I2C communication: MPU6050 IMU
+  - smbus2>=0.4.2
+
+  # NMEA-0183 GPS sentence parsing
+  - pynmea2>=1.18.0
+
+  # NumPy — required by OpenCV OSD rendering
+  - numpy>=1.21
+
+  # OpenCV headless — OSD frame annotation (no GUI stack required)
+  # conda-forge package 'py-opencv' is the headless equivalent of
+  # opencv-python-headless and does not pull in Qt or GTK.
+  - py-opencv>=4.5.0
+
+  # ── Development and test tools ─────────────────────────────────────────────
+  - pytest>=7.0
+  - pytest-cov
+
+  # ── pip-only dependencies ──────────────────────────────────────────────────
+  # These packages are not available on conda-forge and must be installed
+  # via pip.  pigpio also requires the pigpiod system daemon (see above).
+  - pip
+  - pip:
+
+
+    # Offline SRTM terrain elevation tiles for AGL altitude computation.
+    # Downloads .hgt tiles on first use; see docs/GPS.md for pre-caching.
+    - srtm.py>=0.3.5

@@ -230,6 +230,97 @@ def create_osd_mockup(output_path="docs/osd_mockup.png", width=640, height=480):
     draw.text((label_x, label_y), "Cam:+15.0", fill=cam_color, font=font_small)
     
     # ========================================================================
+    # Heading Tape (top-center)
+    # ========================================================================
+    
+    camera_heading = 135  # Example: camera pointing southeast
+    tape_height = int(height * 0.07)
+    tape_width = int(width * 0.25)
+    tape_x = (width - tape_width) // 2
+    tape_y = int(height * 0.02)
+    
+    # Semi-transparent background
+    draw.rectangle([tape_x, tape_y, tape_x + tape_width, tape_y + tape_height],
+                  fill=(0, 0, 0, 127), outline='white', width=1)
+    
+    # Draw tick marks and labels
+    fov_deg = 30  # ±15°
+    degrees_per_pixel = fov_deg / tape_width
+    tape_center_x = tape_x + tape_width // 2
+    
+    min_deg = int(camera_heading - fov_deg/2 - 1)
+    max_deg = int(camera_heading + fov_deg/2 + 2)
+    
+    for deg in range(min_deg, max_deg + 1):
+        normalized_deg = deg % 360
+        
+        # Calculate angular offset
+        angular_offset = normalized_deg - camera_heading
+        if angular_offset > 180:
+            angular_offset -= 360
+        elif angular_offset < -180:
+            angular_offset += 360
+        
+        if abs(angular_offset) > fov_deg/2:
+            continue
+        
+        x_pos = int(tape_center_x + angular_offset / degrees_per_pixel)
+        
+        if x_pos < tape_x or x_pos > tape_x + tape_width:
+            continue
+        
+        tick_y_top = tape_y + 2
+        
+        if normalized_deg % 5 == 0:
+            # Long tick with label every 5°
+            tick_height = 10
+            draw.line([x_pos, tick_y_top, x_pos, tick_y_top + tick_height],
+                     fill='white', width=1)
+            
+            # Degree label
+            label_text = f"{normalized_deg:03d}"
+            bbox = draw.textbbox((0, 0), label_text, font=font_small)
+            text_width = bbox[2] - bbox[0]
+            text_x = x_pos - text_width // 2
+            text_y = tick_y_top + tick_height + 2
+            draw.text((text_x, text_y), label_text, fill='white', font=font_small)
+            
+            # Cardinal direction below degree label
+            if normalized_deg == 0:
+                draw.text((x_pos - 3, text_y + 12), "N", fill='white', font=font_small)
+            elif normalized_deg == 90:
+                draw.text((x_pos - 3, text_y + 12), "E", fill='white', font=font_small)
+            elif normalized_deg == 180:
+                draw.text((x_pos - 3, text_y + 12), "S", fill='white', font=font_small)
+            elif normalized_deg == 270:
+                draw.text((x_pos - 4, text_y + 12), "W", fill='white', font=font_small)
+        else:
+            # Short tick every 1°
+            tick_height = 5
+            draw.line([x_pos, tick_y_top, x_pos, tick_y_top + tick_height],
+                     fill='white', width=1)
+    
+    # Draw center chevron (downward pointing triangle)
+    chevron_size = 6
+    chevron_y = tape_y + tape_height - 2
+    chevron_pts = [(tape_center_x, chevron_y),
+                   (tape_center_x - chevron_size, chevron_y - chevron_size),
+                   (tape_center_x + chevron_size, chevron_y - chevron_size)]
+    draw.polygon(chevron_pts, fill='white')
+    
+    # Draw center heading value box
+    heading_str = f"{camera_heading:03d}°"
+    bbox = draw.textbbox((0, 0), heading_str, font=font_medium)
+    box_width = bbox[2] - bbox[0] + 8
+    box_height = bbox[3] - bbox[1] + 6
+    box_x = tape_center_x - box_width // 2
+    box_y = tape_y + tape_height + 2
+    
+    draw.rectangle([box_x, box_y, box_x + box_width, box_y + box_height],
+                  fill=(0, 0, 0, 127), outline='white', width=1)
+    draw.text((box_x + 4, box_y + 3), heading_str, fill='white', font=font_medium)
+    
+    # ========================================================================
     # Add title/watermark
     # ========================================================================
     
@@ -252,7 +343,7 @@ def create_osd_mockup(output_path="docs/osd_mockup.png", width=640, height=480):
     img.save(output_path, 'PNG')
     print(f"✓ OSD mockup saved to: {output_path}")
     print(f"  Resolution: {width}×{height}")
-    print(f"  Elements: Text info box (top-left), Compass widget (top-right)")
+    print(f"  Elements: Text info box (top-left), Heading tape (top-center), Compass widget (top-right)")
 
 
 if __name__ == '__main__':

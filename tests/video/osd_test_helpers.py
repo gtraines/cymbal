@@ -38,6 +38,10 @@ class OSDOverlay:
         self.show_sbus_channels = False
         self.show_compass       = True
         self.compass_radius     = 45
+        self.show_heading_tape  = True
+        self.heading_tape_height_pct = 0.07
+        self.heading_tape_width_pct = 0.25
+        self.heading_tape_fov_deg = 30.0
 
         self._video_sink = None
         self._time_fn    = time_fn if time_fn is not None else datetime.datetime.utcnow
@@ -66,6 +70,15 @@ class OSDOverlay:
         self.show_sbus_channels = config.show_sbus_channels
         self.show_compass       = config.show_compass
         self.compass_radius     = config.compass_radius
+        # Heading tape fields (optional for backward compatibility)
+        if hasattr(config, 'show_heading_tape'):
+            self.show_heading_tape = config.show_heading_tape
+        if hasattr(config, 'heading_tape_height_pct'):
+            self.heading_tape_height_pct = config.heading_tape_height_pct
+        if hasattr(config, 'heading_tape_width_pct'):
+            self.heading_tape_width_pct = config.heading_tape_width_pct
+        if hasattr(config, 'heading_tape_fov_deg'):
+            self.heading_tape_fov_deg = config.heading_tape_fov_deg
 
     def initialize(self, video_sink=None):
         """Attach optional video sink. Returns True always in the test stub."""

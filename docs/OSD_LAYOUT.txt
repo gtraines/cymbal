@@ -4,6 +4,15 @@
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
 ┌─────────────────────────────────────────────────────────────────────┐
+│                 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓       │
+│                 ┃  120   125   130   135   140   145   150  ┃       │
+│                 ┃   │     │     │     ▼     │     │     │   ┃       │
+│                 ┃   ╵     ╵     ╵     ┃     ╵     ╵     ╵   ┃       │
+│                 ┃             SE  S  SW     135°            ┃       │
+│                 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛       │
+│                     ▲ HEADING TAPE (camera absolute heading)         │
+│                       Top-center, 2% from top edge                   │
+│                                                                       │
 │ ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓                          N            │
 │ ┃ TEXT INFO BOX              ┃                         ┃            │
 │ ┃ (Top-left, 10,10)          ┃                     ┏━━━╋━━━┓        │
@@ -171,3 +180,44 @@ def on_frame(frame):
     # ... encode/stream/save frame ...
 
 osd.close()
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ HEADING TAPE WIDGET DETAIL (Top-center)                              ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Position: Horizontally centered, 2% from top edge
+Default size: 7% of frame height, 25% of frame width
+Field of view: ±15° from camera heading (30° total span)
+
+                  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+                  ┃  120   125   130   135   140   145   150  ┃
+                  ┃   │     │     │     ▼     │     │     │   ┃
+                  ┃   ╵     ╵     ╵     ┃     ╵     ╵     ╵   ┃
+                  ┃             SE  S  SW     135°            ┃
+                  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Components:
+  - Tick marks: 1° intervals (short), 5° intervals (long with labels)
+  - Degree labels: Every 5° (005, 010, 015, 020, ... 355, 000)
+  - Cardinal directions: N/E/S/W shown BELOW degree labels at 0°/90°/180°/270°
+  - Center chevron: Downward-pointing triangle at center (current heading)
+  - Heading box: Framed numeric value below tape showing current heading
+  - Semi-transparent background (black @ 50%) with white border
+
+Camera Heading Calculation:
+  - Absolute camera heading = GPS ground track + camera yaw offset
+  - Example: Track=100°, Camera Yaw=+35° → Heading=135°
+  - Automatically handles wraparound at 0°/360° boundary
+  - Suppressed when either GPS track or camera yaw is unavailable (NaN)
+
+Wraparound Examples:
+  - Heading=5°:   Tape shows 350°-355°-000°-005°-010°-015°-020°
+  - Heading=135°: Tape shows 120°-125°-130°-135°-140°-145°-150°
+  - Heading=355°: Tape shows 340°-345°-350°-355°-000°-005°-010°
+
+Configuration Options (in osd config section):
+  - show_heading_tape: bool = True
+  - heading_tape_height_pct: float = 0.07 (7% of frame height)
+  - heading_tape_width_pct: float = 0.25 (25% of frame width)
+  - heading_tape_fov_deg: float = 30.0 (±15° field of view)
+
