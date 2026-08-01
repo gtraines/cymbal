@@ -209,7 +209,11 @@ def draw_heading_tape(draw, cx, y, tape_w, tape_h, heading_deg,
 
 def draw_compass(draw, ccx, ccy, cr, track_deg, cam_yaw,
                  font_med, font_sm, font_xs):
-    """Compass widget: aircraft outline + camera arrow + N/E/S/W labels."""
+    """
+    Compass widget: HSI-style aircraft silhouette + camera arrow + N/E/S/W labels.
+
+    Drawing order: ring → cardinals → aircraft symbol → camera arrow (on top).
+    """
 
     # Background disc
     draw.ellipse([ccx - cr - 14, ccy - cr - 14,
@@ -237,61 +241,68 @@ def draw_compass(draw, ccx, ccy, cr, track_deg, cam_yaw,
         lh2 = th(draw, lbl, font)
         put_text(draw, tx - lw2 // 2, ty - lh2 // 2, lbl, font, color)
 
-    # Aircraft symbol (pointing in track direction)
+    # -------------------------------------------------------------------------
+    # HSI-style aircraft silhouette (same geometry as overlay_controller.pyx)
+    # -------------------------------------------------------------------------
     tr = math.radians(track_deg)
-    st = math.sin(tr); ct2 = math.cos(tr)
+    st = math.sin(tr)
+    ct2 = math.cos(tr)
 
     def rot(dx, dy):
         return (int(ccx + dx * st + dy * ct2),
                 int(ccy - dx * ct2 + dy * st))
 
-    # Nose triangle
-    nose_tip = rot(0, -int(cr * 0.80))
-    nose_lw  = rot(-int(cr * 0.12), -int(cr * 0.52))
-    nose_rw  = rot( int(cr * 0.12), -int(cr * 0.52))
-    # Fuselage tail
-    tail     = rot(0,  int(cr * 0.65))
-    # Mid-fuselage (wing attach point, slightly forward of center)
-    fwd      = rot(0,  int(cr * 0.05))
-    # Wings
-    wl       = rot(-int(cr * 0.72), int(cr * 0.20))
-    wr       = rot( int(cr * 0.72), int(cr * 0.20))
-    # Tail fins
-    tl       = rot(-int(cr * 0.26), int(cr * 0.55))
-    tr2      = rot( int(cr * 0.26), int(cr * 0.55))
+    nose_tip = rot(0,               -int(cr * 0.78))
+    nose_l   = rot(-int(cr * 0.10), -int(cr * 0.50))
+    nose_r   = rot( int(cr * 0.10), -int(cr * 0.50))
+    fus_top  = rot(0,               -int(cr * 0.50))
+    fus_bot  = rot(0,                int(cr * 0.62))
+    wing_fwd = rot(0,               -int(cr * 0.04))
+    wl       = rot(-int(cr * 0.70),  int(cr * 0.20))
+    wr       = rot( int(cr * 0.70),  int(cr * 0.20))
+    stab_l   = rot(-int(cr * 0.27),  int(cr * 0.54))
+    stab_r   = rot( int(cr * 0.27),  int(cr * 0.54))
 
-    segments = [
-        (nose_tip, tail),   # fuselage
-        (fwd, wl),          # left wing
-        (fwd, wr),          # right wing
-        (tl, tr2),          # horizontal tail
+    segs = [
+        (fus_top, fus_bot),
+        (wing_fwd, wl),
+        (wing_fwd, wr),
+        (stab_l, stab_r),
     ]
-    # Shadow
-    for a, b in segments:
-        draw.line([a[0] + 1, a[1] + 1, b[0] + 1, b[1] + 1], fill=BLACK, width=4)
-    # White fill
-    for a, b in segments:
-        draw.line([a[0], a[1], b[0], b[1]], fill=WHITE, width=2)
-    # Filled nose triangle
-    draw.polygon([nose_tip, nose_lw, nose_rw], fill=BLACK)
-    draw.polygon([nose_tip, nose_lw, nose_rw], outline=WHITE, width=1)
 
-    # Camera aim arrow (yellow)
+    # Shadow pass
+    for a, b in segs:
+        draw.line([a[0]+1, a[1]+1, b[0]+1, b[1]+1], fill=BLACK, width=4)
+    draw.polygon([nose_tip, nose_l, nose_r], fill=BLACK, outline=BLACK)
+
+    # Fill pass
+    for a, b in segs:
+        draw.line([a[0], a[1], b[0], b[1]], fill=WHITE, width=2)
+    draw.polygon([nose_tip, nose_l, nose_r], fill=WHITE, outline=WHITE)
+
+    # Center pivot dot
+    draw.ellipse([ccx-4, ccy-4, ccx+4, ccy+4], fill=BLACK)
+    draw.ellipse([ccx-3, ccy-3, ccx+3, ccy+3], fill=WHITE)
+
+    # -------------------------------------------------------------------------
+    # Camera aim arrow — drawn LAST so it's always on top of the aircraft symbol
+    # -------------------------------------------------------------------------
     cam_rad = math.radians(track_deg + cam_yaw)
     cam_len = int(cr * 0.65)
     cax = int(ccx + cam_len * math.sin(cam_rad))
     cay = int(ccy - cam_len * math.cos(cam_rad))
-    draw.line([ccx + 1, ccy + 1, cax + 1, cay + 1], fill=BLACK, width=4)
+
+    draw.line([ccx+1, ccy+1, cax+1, cay+1], fill=BLACK, width=4)
     draw.line([ccx, ccy, cax, cay], fill=YELLOW, width=2)
-    # arrowhead lines
+
     for delta in [150, -150]:
         ha = math.radians(delta)
         hx = int(cax + 10 * math.sin(cam_rad + ha))
         hy = int(cay - 10 * math.cos(cam_rad + ha))
-        draw.line([cax + 1, cay + 1, hx + 1, hy + 1], fill=BLACK, width=4)
+        draw.line([cax+1, cay+1, hx+1, hy+1], fill=BLACK, width=4)
         draw.line([cax, cay, hx, hy], fill=YELLOW, width=2)
 
-    # Labels (left-aligned below the disc, safely within frame)
+    # Labels (left-aligned below disc)
     lbl_x = ccx - cr
     lbl_y = ccy + cr + 16
     put_text(draw, lbl_x, lbl_y,      f"Trk:{track_deg:05.1f} (True)", font_sm, WHITE)

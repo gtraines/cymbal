@@ -581,8 +581,9 @@ cdef class OSDOverlay:
             ty = int(cy - (outer_r + 10) * c) + 5
             self._put_text_shadowed(frame, lbl, tx, ty, lscale, lcolor, lthick)
 
-        # Aircraft symbol: detailed outline (nose + fuselage + wings + tail)
-        # drawn relative to track_deg (nose points in track direction)
+        # Aircraft symbol: HSI-style silhouette
+        # Nose triangle (filled) + fuselage line + swept wings + stabilizer bar
+        # Camera arrow is drawn AFTER so it always renders on top.
         if have_track:
             track_rad = track_deg * pi / 180.0
             sin_t = math.sin(track_rad)
@@ -593,27 +594,41 @@ cdef class OSDOverlay:
                 return (int(cx + dx * sin_t + dy * cos_t),
                         int(cy - dx * cos_t + dy * sin_t))
 
-            # Fuselage: from nose (+r*0.75 forward) to tail (-r*0.65 back)
-            nose  = _rot(0, -int(radius * 0.75))
-            tail  = _rot(0,  int(radius * 0.65))
-            cv2.line(frame, nose, tail, _BLACK, 4, cv2.LINE_AA)
-            cv2.line(frame, nose, tail, _WHITE, 2, cv2.LINE_AA)
+            # Key points (body-frame: +y = aft, +x = starboard)
+            nose_tip = _rot(0,              -int(radius * 0.78))
+            nose_l   = _rot(-int(radius * 0.10), -int(radius * 0.50))
+            nose_r   = _rot( int(radius * 0.10), -int(radius * 0.50))
+            fus_top  = _rot(0,              -int(radius * 0.50))
+            fus_bot  = _rot(0,               int(radius * 0.62))
+            wing_fwd = _rot(0,              -int(radius * 0.04))
+            wl       = _rot(-int(radius * 0.70),  int(radius * 0.20))
+            wr       = _rot( int(radius * 0.70),  int(radius * 0.20))
+            stab_l   = _rot(-int(radius * 0.27),  int(radius * 0.54))
+            stab_r   = _rot( int(radius * 0.27),  int(radius * 0.54))
 
-            # Wings: swept back from mid-fuselage
-            mid   = _rot(0,  int(radius * 0.05))
-            wl    = _rot(-int(radius * 0.72), int(radius * 0.22))
-            wr    = _rot( int(radius * 0.72), int(radius * 0.22))
-            cv2.line(frame, mid, wl, _BLACK, 4, cv2.LINE_AA)
-            cv2.line(frame, mid, wl, _WHITE, 2, cv2.LINE_AA)
-            cv2.line(frame, mid, wr, _BLACK, 4, cv2.LINE_AA)
-            cv2.line(frame, mid, wr, _WHITE, 2, cv2.LINE_AA)
+            import numpy as _np_sym
 
-            # Tail: small horizontal bar near the tail
-            tc    = _rot(0,  int(radius * 0.55))
-            tl    = _rot(-int(radius * 0.28), int(radius * 0.55))
-            tr    = _rot( int(radius * 0.28), int(radius * 0.55))
-            cv2.line(frame, tl, tr, _BLACK, 4, cv2.LINE_AA)
-            cv2.line(frame, tl, tr, _WHITE, 2, cv2.LINE_AA)
+            # --- Shadow pass (all elements, black, thick) ---
+            cv2.line(frame, fus_top, fus_bot, _BLACK, 4, cv2.LINE_AA)
+            cv2.line(frame, wing_fwd, wl,     _BLACK, 4, cv2.LINE_AA)
+            cv2.line(frame, wing_fwd, wr,     _BLACK, 4, cv2.LINE_AA)
+            cv2.line(frame, stab_l, stab_r,   _BLACK, 4, cv2.LINE_AA)
+            cv2.fillPoly(frame,
+                         [_np_sym.array([nose_tip, nose_l, nose_r], dtype=_np_sym.int32)],
+                         _BLACK)
+
+            # --- Fill pass (white, thinner) ---
+            cv2.line(frame, fus_top, fus_bot, _WHITE, 2, cv2.LINE_AA)
+            cv2.line(frame, wing_fwd, wl,     _WHITE, 2, cv2.LINE_AA)
+            cv2.line(frame, wing_fwd, wr,     _WHITE, 2, cv2.LINE_AA)
+            cv2.line(frame, stab_l, stab_r,   _WHITE, 2, cv2.LINE_AA)
+            cv2.fillPoly(frame,
+                         [_np_sym.array([nose_tip, nose_l, nose_r], dtype=_np_sym.int32)],
+                         _WHITE)
+
+            # Center dot (pivot reference)
+            cv2.circle(frame, (cx, cy), 3, _BLACK, -1, cv2.LINE_AA)
+            cv2.circle(frame, (cx, cy), 2, _WHITE, -1, cv2.LINE_AA)
 
         # Camera aim arrow (yellow)
         if have_cam:
