@@ -66,7 +66,11 @@ except ImportError as exc:
 try:
     from cymbal.controller.socket_telemetry_provider import SocketTelemetryProvider
     from cymbal.controller.telemetry_provider import InProcessTelemetryProvider
-    from cymbal.controller.ipc_schemas import SOCKET_TELEMETRY_PATH
+    from cymbal.controller.ipc_schemas import (
+        SOCKET_TELEMETRY_PATH,
+        SOCKET_CONTROLLER_PATH,
+        ControllerStateSchema,
+    )
 except ImportError as exc:
     logger.critical(f"Could not import telemetry providers: {exc}")
     sys.exit(1)
@@ -127,6 +131,80 @@ def _load_config() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Controller state reader (POI / target data)
+# ---------------------------------------------------------------------------
+
+class _ControllerStateReader:
+    """
+    Non-blocking reader for ControllerState datagrams published by
+    CymbalController on SOCKET_CONTROLLER_PATH.
+
+    Binds to SOCKET_CONTROLLER_PATH + '.reader' so the controller can
+    send datagrams directly to this process.  poll() drains the socket
+    and returns the most-recent valid datagram (or None if empty).
+    """
+
+    def __init__(self, socket_path: str = SOCKET_CONTROLLER_PATH):
+        self._socket_path = socket_path
+        self._reader_path = socket_path + ".reader"
+        self._sock        = None
+        self._last_state  = None
+
+    def initialize(self) -> bool:
+        try:
+            import socket as _sock_mod
+            sock_dir = os.path.dirname(self._reader_path)
+            if sock_dir:
+                os.makedirs(sock_dir, exist_ok=True)
+            if os.path.exists(self._reader_path):
+                os.unlink(self._reader_path)
+            self._sock = _sock_mod.socket(_sock_mod.AF_UNIX, _sock_mod.SOCK_DGRAM)
+            self._sock.bind(self._reader_path)
+            self._sock.setblocking(False)
+            logger.info(f"cymbal-video: controller state reader bound at {self._reader_path}")
+            return True
+        except Exception as e:
+            logger.warning(f"cymbal-video: controller state reader unavailable ({e}); "
+                           "target OSD panel disabled")
+            self._sock = None
+            return False
+
+    def poll(self) -> dict | None:
+        """
+        Drain socket and return the most-recent valid state dict, or None.
+        """
+        if self._sock is None:
+            return None
+        latest = None
+        try:
+            while True:
+                data, _ = self._sock.recvfrom(ControllerStateSchema.SIZE + 16)
+                parsed = ControllerStateSchema.unpack(data)
+                if parsed.get('valid'):
+                    latest = parsed
+        except BlockingIOError:
+            pass
+        except Exception as e:
+            logger.debug(f"cymbal-video: controller state read error: {e}")
+        if latest is not None:
+            self._last_state = latest
+        return self._last_state
+
+    def close(self):
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except Exception:
+                pass
+            self._sock = None
+        if os.path.exists(self._reader_path):
+            try:
+                os.unlink(self._reader_path)
+            except Exception:
+                pass
+
+
+# ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
 
@@ -146,6 +224,7 @@ class VideoService:
         self._osd       = None
         self._provider  = None
         self._sink      = None
+        self._ctrl_reader = None   # _ControllerStateReader for POI/target data
 
         vcfg = cfg['video']
         self._width          = int(vcfg.get('width',  640))
@@ -160,6 +239,7 @@ class VideoService:
         self._init_telemetry()
         self._init_osd()
         self._init_camera()
+        self._init_controller_reader()
         self._running = True
         signal.signal(signal.SIGINT,  self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -270,6 +350,14 @@ class VideoService:
         except Exception as e:
             logger.warning(f"cymbal-video: camera init error: {e}; using blank frames")
 
+    def _init_controller_reader(self):
+        """Open the controller state reader socket for POI/target data."""
+        ctrl_path = self._cfg.get('controller', {}).get(
+            'socket_path', SOCKET_CONTROLLER_PATH
+        )
+        self._ctrl_reader = _ControllerStateReader(socket_path=ctrl_path)
+        self._ctrl_reader.initialize()  # failure is non-fatal and logged internally
+
     def _run_loop(self):
         logger.info("cymbal-video: render loop running")
         while self._running:
@@ -279,16 +367,30 @@ class VideoService:
             if self._provider is not None:
                 self._provider.update()
 
-            # 2. Acquire frame
+            # 2. Poll controller state (POI / target data) — non-blocking
+            if self._ctrl_reader is not None and self._osd is not None:
+                ctrl = self._ctrl_reader.poll()
+                if ctrl is not None:
+                    self._osd.update_target(
+                        poi_locked    = ctrl.get('poi_locked', False),
+                        poi_lat       = ctrl.get('poi_lat', float('nan')),
+                        poi_lon       = ctrl.get('poi_lon', float('nan')),
+                        poi_alt_msl   = ctrl.get('poi_alt_msl', float('nan')),
+                        slant_range_m = ctrl.get('slant_range_m', float('nan')),
+                        poi_address   = "",  # address lookup for target TBD
+                    )
+
+            # 3. Acquire frame
             frame = self._capture_frame()
 
-            # 3. Push telemetry into OSD and render
+            # 4. Push telemetry into OSD and render
             if self._osd is not None and frame is not None:
                 tp = self._provider
                 self._osd.update_telemetry(
                     lat            = tp.latitude        if tp is not None and not math.isnan(tp.latitude) else float('nan'),
                     lon            = tp.longitude       if tp is not None and not math.isnan(tp.longitude) else float('nan'),
                     alt_agl        = tp.altitude_agl    if tp is not None else float('nan'),
+                    alt_msl        = tp.altitude_msl    if tp is not None else float('nan'),
                     groundspeed    = tp.groundspeed_ms  if tp is not None else float('nan'),
                     address        = tp.address         if tp is not None else "No fix",
                     fix_quality    = tp.fix_quality     if tp is not None else 0,
@@ -299,7 +401,7 @@ class VideoService:
                 )
                 self._osd.render_frame(frame)
 
-            # 4. Rate-limit
+            # 5. Rate-limit
             elapsed   = time.monotonic() - t_start
             remaining = self._frame_interval - elapsed
             if remaining > 0:
@@ -330,6 +432,9 @@ class VideoService:
             except Exception: pass
         if self._provider is not None:
             try: self._provider.close()
+            except Exception: pass
+        if self._ctrl_reader is not None:
+            try: self._ctrl_reader.close()
             except Exception: pass
         logger.info("cymbal-video: stopped")
 
