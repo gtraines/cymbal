@@ -25,7 +25,7 @@ cdef class ChannelMapper:
 
     cpdef bint initialize(self, object config)
     cpdef bint initialize_from_gimbals(self, list gimbal_defs,
-                                       int mode_channel, int poi_lock_channel)
+                                       int mode_channel=*, int poi_lock_channel=*)
     cpdef dict get_gimbal_commands(self, object sbus)
     cpdef dict get_commands(self, object sbus)
     cpdef int get_mode_index(self, object sbus)

@@ -98,7 +98,7 @@ cdef class SBUSDecoder:
             return False
 
         # Decode flags byte
-        cdef unsigned char flags = frame_bytes[23]
+        flags = frame_bytes[23]
         self.channels[16]    = 1 if (flags & FLAG_DIGITAL_CH17) else 0
         self.channels[17]    = 1 if (flags & FLAG_DIGITAL_CH18) else 0
         self.frame_lost      = bool(flags & FLAG_FRAME_LOST)
@@ -144,10 +144,12 @@ cdef class SBUSDecoder:
         the per-frame cost is ~3 µs on Pi 3B+ — well within the 14 ms budget.
         """
         cdef int i, ch
+        cdef unsigned char b
         # bit_stream is a Python integer (176 bits — exceeds C 64-bit range)
         bit_stream = 0
         for i in range(22):
-            bit_stream |= (<unsigned long long>(frame_bytes[1 + i])) << (i * 8)
+            b = frame_bytes[1 + i]
+            bit_stream |= int(b) << (i * 8)
 
         for ch in range(16):
             self.channels[ch] = (bit_stream >> (ch * 11)) & 0x7FF

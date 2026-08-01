@@ -16,13 +16,16 @@ import unittest
 
 def _load_config_module():
     """Load cymbal/utils/config.pyx as a plain Python module."""
-    # Stub packages that would trigger Cython import chain
-    for name in [
+    # Stub packages that would trigger Cython import chain, then restore
+    # sys.modules so later tests can still import the real cymbal package.
+    stub_names = [
         'cymbal', 'cymbal.camera_gimbal', 'cymbal.camera_gimbal.storm32_controller',
         'cymbal.spotlight_gimbal', 'cymbal.spotlight_gimbal.servo_controller',
         'cymbal.sensors', 'cymbal.sensors.mpu6050',
         'cymbal.utils', 'cymbal.utils.config',
-    ]:
+    ]
+    saved = {name: sys.modules.get(name) for name in stub_names}
+    for name in stub_names:
         if name not in sys.modules:
             sys.modules[name] = types.ModuleType(name)
 
@@ -31,6 +34,15 @@ def _load_config_module():
     pyx_path = os.path.join(root, 'cymbal', 'utils', 'config.pyx')
     with open(pyx_path) as f:
         exec(compile(f.read(), pyx_path, 'exec'), mod.__dict__)
+
+    # Restore sys.modules to avoid polluting the real cymbal package for
+    # tests that run later in the same session.
+    for name, old in saved.items():
+        if old is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = old
+
     return mod
 
 

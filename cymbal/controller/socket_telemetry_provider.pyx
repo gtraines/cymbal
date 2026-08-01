@@ -192,13 +192,14 @@ cdef class SocketTelemetryProvider(TelemetryProvider):
     cdef void _mark_stale(self, double now):
         """Clear fields that should not be used when data is stale; log the event."""
         cdef bint was_fresh = self._prev_has_fix
+        cdef double age_ms
 
         self.has_fix     = False
         self.address     = "No fix"
         # Preserve lat/lon/altitude so the last known position is still
         # readable; callers must check has_fix before relying on them.
         if self.last_snapshot_time > 0.0:
-            cdef double age_ms = (now - self.last_snapshot_time) * 1000.0
+            age_ms = (now - self.last_snapshot_time) * 1000.0
             self.data_age_ms = age_ms
             if age_ms > self.max_data_age_ms:
                 self.max_data_age_ms = age_ms

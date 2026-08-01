@@ -64,3 +64,18 @@ cdef class CymbalController:
     cpdef double get_groundspeed(self)
     cpdef void lock_poi(self, double lat, double lon)
     cpdef void unlock_poi(self)
+
+    cdef void _init_gimbals(self)
+    cdef void _init_telemetry_provider(self)
+    cdef void _init_sbus(self)
+    cdef void _init_channel_mapper(self)
+    cdef void _apply_control_mode(self)
+    cdef void _apply_manual_mode(self)
+    cdef void _apply_legacy_commands(self, dict cmds)
+    cdef void _apply_failsafe(self)
+    cdef tuple _compute_poi_angles(self, double ac_lat, double ac_lon,
+                                   double ac_alt_agl,
+                                   double poi_lat, double poi_lon)
+    cdef void _point_all_gimbals(self, double pitch, double yaw)
+    cdef void _lock_poi(self, double lat, double lon)
+    cdef void _sleep_to_interval(self, double t_start, double interval)
