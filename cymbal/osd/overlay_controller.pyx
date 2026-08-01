@@ -12,19 +12,26 @@ Library choice: OpenCV (cv2) drawing primitives.
   - Alternatives (pygame, PIL) would add a separate dependency and a heavier
     rendering pipeline; cv2 keeps everything in one library.
 
-Compass widget:
-  A small circle rendered in the top-right corner of the frame shows:
-  - White arrow: aircraft travel direction (GPS ground track, north-up).
-  - Yellow arrow: absolute camera aim direction (track + camera yaw).
-  - "N" label and cardinal tick marks on the ring.
-  - Text labels Trk/Cam below the ring.
+Layout:
+  Top-left  — Aircraft panel (position, altitude in ft, speed in mph, fix).
+  Top-center — Scrolling heading tape (bright green), camera heading box.
+  Top-right  — Compass widget (aircraft symbol + camera arrow, north-up).
+  Center     — Crosshair (bright green) with center gap.
+  Bottom-right — Target panel (magenta), shown only when a POI is locked.
+
+Units:
+  All internal values and IPC messages stay in SI (metres, m/s).
+  Display conversions happen only inside _build_aircraft_lines() and
+  _build_target_lines() using the module-level _M_TO_FT / _MS_TO_MPH constants.
 
 Usage:
     osd = OSDOverlay(config.osd)
     osd.initialize()
     osd.update_telemetry(lat, lon, alt_agl, groundspeed, address,
                          fix_quality, satellites, sbus_channels,
-                         track_degrees, camera_yaw_deg)
+                         track_degrees, camera_yaw_deg, alt_msl=alt_msl)
+    osd.update_target(poi_locked, poi_lat, poi_lon, poi_alt_msl,
+                      slant_range_m, poi_address)
     # In camera loop:
     osd.render_frame(frame)   # annotates frame in-place
     osd.close()
@@ -48,14 +55,25 @@ _FONT = None  # set in initialize() once cv2 is available
 
 _NAN = float('nan')
 
+# Unit conversion factors (SI → Imperial, display-only)
+_M_TO_FT   = 3.28084
+_MS_TO_MPH = 2.23694
+
+# OSD colour palette (BGR)
+_WHITE   = (255, 255, 255)
+_BLACK   = (0,   0,   0)
+_GREEN   = (0,   255, 0)    # heading tape, crosshair
+_MAGENTA = (255, 0,   255)  # target panel
+_YELLOW  = (0,   215, 255)  # compass N label, camera arrow
+
 
 cdef class OSDOverlay:
     """
     Telemetry OSD that annotates numpy video frames using OpenCV.
 
-    All public fields are updated by update_telemetry(); render_frame()
-    draws the cached values onto a frame buffer.  Both methods are safe to
-    call from the same thread without locking.
+    All public fields are updated by update_telemetry() / update_target();
+    render_frame() draws the cached values onto a frame buffer.  Both
+    methods are safe to call from the same thread without locking.
 
     Args:
         config:   OSDConfig dataclass instance, or None for defaults.
@@ -66,8 +84,8 @@ cdef class OSDOverlay:
 
     def __init__(self, config=None, time_fn=None):
         self.enabled = True
-        self.font_scale = 0.6
-        self.font_thickness = 1
+        self.font_scale = 0.65
+        self.font_thickness = 2
         self._text_color = (255, 255, 255)
         self._bg_color = (0, 0, 0)
         self.background_alpha = 0.5
@@ -82,9 +100,11 @@ cdef class OSDOverlay:
         self._video_sink = None
         self._time_fn = time_fn if time_fn is not None else datetime.datetime.utcnow
 
+        # Aircraft telemetry
         self.lat = _NAN
         self.lon = _NAN
         self.alt_agl = _NAN
+        self.alt_msl = _NAN
         self.groundspeed_ms = _NAN
         self.address = "No fix"
         self.fix_quality = 0
@@ -92,6 +112,14 @@ cdef class OSDOverlay:
         self.sbus_channels = []
         self.track_degrees = _NAN
         self.camera_yaw_deg = _NAN
+
+        # Target / POI
+        self.poi_locked     = False
+        self.poi_lat        = _NAN
+        self.poi_lon        = _NAN
+        self.poi_alt_msl    = _NAN
+        self.slant_range_ft = _NAN
+        self.poi_address    = ""
 
         if config is not None:
             self._apply_config(config)
@@ -147,26 +175,32 @@ cdef class OSDOverlay:
                                 int fix_quality, int satellites,
                                 object sbus_channels,
                                 double track_degrees,
-                                double camera_yaw_deg):
+                                double camera_yaw_deg,
+                                double alt_msl=_NAN):
         """
-        Cache the latest telemetry for the next render_frame() call.
+        Cache the latest aircraft telemetry for the next render_frame() call.
+
+        All float arguments use SI units (metres, m/s).  Imperial conversions
+        happen only in the display layer (_build_aircraft_lines).
 
         Args:
-            lat:           Latitude in decimal degrees (NaN if no fix).
-            lon:           Longitude in decimal degrees (NaN if no fix).
-            alt_agl:       Altitude above ground level in meters (NaN if unknown).
-            groundspeed:   Ground speed in m/s (NaN if unknown).
-            address:       Nearest street address string.
-            fix_quality:   GPS fix quality (0=none, 1=GPS, 2=DGPS).
-            satellites:    Number of satellites in use.
-            sbus_channels: Sequence of 18 raw SBUS channel values for debug display.
-            track_degrees: GPS ground track in degrees from north, clockwise (NaN if unknown).
+            lat:            Latitude in decimal degrees (NaN if no fix).
+            lon:            Longitude in decimal degrees (NaN if no fix).
+            alt_agl:        Altitude above ground level, metres (NaN if unknown).
+            groundspeed:    Ground speed, m/s (NaN if unknown).
+            address:        Nearest street address string.
+            fix_quality:    GPS fix quality (0=none, 1=GPS, 2=DGPS).
+            satellites:     Number of satellites in use.
+            sbus_channels:  Sequence of 18 raw SBUS channel values for debug display.
+            track_degrees:  GPS ground track, degrees from north clockwise (NaN if unknown).
             camera_yaw_deg: Camera yaw offset from aircraft nose in degrees
                             (positive = right, negative = left; NaN if unknown).
+            alt_msl:        Altitude above mean sea level, metres (NaN if unknown).
         """
         self.lat = lat
         self.lon = lon
         self.alt_agl = alt_agl
+        self.alt_msl = alt_msl
         self.groundspeed_ms = groundspeed
         self.address = address
         self.fix_quality = fix_quality
@@ -174,6 +208,31 @@ cdef class OSDOverlay:
         self.sbus_channels = sbus_channels
         self.track_degrees = track_degrees
         self.camera_yaw_deg = camera_yaw_deg
+
+    cpdef void update_target(self, bint poi_locked, double poi_lat, double poi_lon,
+                             double poi_alt_msl, double slant_range_m,
+                             str poi_address):
+        """
+        Cache the latest target/POI data for the next render_frame() call.
+
+        Args:
+            poi_locked:    True when a target is actively locked.
+            poi_lat:       Target latitude, decimal degrees (NaN if not locked).
+            poi_lon:       Target longitude, decimal degrees (NaN if not locked).
+            poi_alt_msl:   Target terrain elevation, metres MSL (NaN if unknown).
+            slant_range_m: 3D aircraft→target distance, metres (NaN if unknown).
+            poi_address:   Nearest street address at the target location.
+        """
+        self.poi_locked     = poi_locked
+        self.poi_lat        = poi_lat
+        self.poi_lon        = poi_lon
+        self.poi_alt_msl    = poi_alt_msl
+        # Convert slant range to feet for display
+        if not math.isnan(slant_range_m):
+            self.slant_range_ft = slant_range_m * _M_TO_FT
+        else:
+            self.slant_range_ft = _NAN
+        self.poi_address    = poi_address
 
     cpdef void render_frame(self, object frame):
         """
@@ -183,18 +242,23 @@ cdef class OSDOverlay:
             frame: A numpy ndarray (H × W × 3, uint8, BGR) from a camera.
                    If None, this method returns immediately.
         """
-        cdef list lines
-        cdef int x, y, fh, fw, cx, cy
+        cdef int fh, fw, cx, cy
         cdef double camera_heading
 
         if not self.enabled or cv2 is None or frame is None:
             return
 
-        x = 10
-        y = 30
-        lines = self._build_lines()
-        self._draw_text_box(frame, lines, x, y)
+        # 1. Aircraft panel — top-left
+        self._draw_text_box(frame, self._build_aircraft_lines(), 10, 30)
 
+        # 2. Target panel — bottom-right (only when POI is locked)
+        if self.poi_locked:
+            self._draw_target_panel(frame)
+
+        # 3. Crosshair — frame center, bright green
+        self._draw_crosshair(frame)
+
+        # 4. Compass widget — top-right
         if self.show_compass:
             fh, fw = frame.shape[:2]
             cx = fw - self.compass_radius - 15
@@ -206,23 +270,24 @@ cdef class OSDOverlay:
                 self.camera_yaw_deg,
             )
 
-        # Draw heading tape if enabled and data available
+        # 5. Heading tape — top-center (green)
         if self.show_heading_tape:
-            # Compute absolute camera heading from track + yaw
             camera_heading = _NAN
             if not math.isnan(self.track_degrees) and not math.isnan(self.camera_yaw_deg):
                 camera_heading = (self.track_degrees + self.camera_yaw_deg) % 360.0
-            
             if not math.isnan(camera_heading):
                 self._draw_heading_tape(frame, camera_heading)
 
-        # Forward to the attached video sink (HeadlessSink by default)
+        # Forward to the attached video sink
         if self._video_sink is not None:
             self._video_sink.write_frame(frame)
 
-    def _build_lines(self):
-        """Assemble the list of text lines to display."""
+    def _build_aircraft_lines(self):
+        """Assemble the aircraft panel text lines (Imperial units for display)."""
         lines = []
+
+        # Panel header
+        lines.append("\u2500\u2500 AIRCRAFT \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
 
         # Timestamp — use injected callable for testability
         ts = self._time_fn().strftime("%H:%M:%S UTC")
@@ -237,15 +302,15 @@ cdef class OSDOverlay:
         else:
             lines.append("GPS: No fix")
 
-        # Altitude AGL
-        if not math.isnan(self.alt_agl):
-            lines.append(f"Alt AGL: {self.alt_agl:.1f} m")
-        else:
-            lines.append("Alt AGL: --")
+        # Altitude AGL in feet + GPS altitude MSL in feet
+        agl_str = f"{self.alt_agl * _M_TO_FT:.0f} ft" if not math.isnan(self.alt_agl) else "--"
+        msl_str = f"{self.alt_msl * _M_TO_FT:.0f} ft" if not math.isnan(self.alt_msl) else "--"
+        lines.append(f"Alt AGL: {agl_str}  GPS Alt: {msl_str}")
 
-        # Groundspeed
+        # Groundspeed in mph + heading type label
         if not math.isnan(self.groundspeed_ms):
-            lines.append(f"GndSpd: {self.groundspeed_ms:.1f} m/s")
+            spd_mph = self.groundspeed_ms * _MS_TO_MPH
+            lines.append(f"GndSpd: {spd_mph:.1f} mph  (True)")
         else:
             lines.append("GndSpd: --")
 
@@ -263,13 +328,50 @@ cdef class OSDOverlay:
 
         return lines
 
-    cdef void _draw_text_box(self, object frame, list lines, int x, int y):
+    # Keep _build_lines as an alias for backward compatibility
+    def _build_lines(self):
+        return self._build_aircraft_lines()
+
+    def _build_target_lines(self):
+        """Assemble the target panel text lines (Imperial units for display)."""
+        if not self.poi_locked:
+            return []
+
+        lines = []
+        lines.append("\u2500\u2500 TARGET \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
+
+        if not math.isnan(self.poi_lat) and not math.isnan(self.poi_lon):
+            lines.append(f"Lat: {self.poi_lat:.5f}  Lon: {self.poi_lon:.5f}")
+        else:
+            lines.append("Lat: --  Lon: --")
+
+        if not math.isnan(self.poi_alt_msl):
+            elev_ft = self.poi_alt_msl * _M_TO_FT
+            lines.append(f"Elev: {elev_ft:.0f} ft MSL")
+        else:
+            lines.append("Elev: --")
+
+        if not math.isnan(self.slant_range_ft):
+            lines.append(f"Slant Range: {self.slant_range_ft:.0f} ft")
+        else:
+            lines.append("Slant Range: --")
+
+        if self.poi_address:
+            lines.append(self.poi_address)
+
+        return lines
+
+    cdef void _draw_text_box(self, object frame, list lines, int x, int y,
+                             object text_color=None):
         """Draw a semi-transparent background box and then render text lines."""
         cdef int max_width, w, h, total_height, pad, lh, bx1, by1, bx2, by2, fh, fw, ty
         cdef object overlay
+        cdef object color
 
-        pad = 6
-        lh = int(28 * self.font_scale)
+        color = text_color if text_color is not None else self._text_color
+
+        pad = 8
+        lh = int(30 * self.font_scale)
 
         # Measure the widest line
         max_width = 0
@@ -297,7 +399,7 @@ cdef class OSDOverlay:
             overlay,
             (bx1, by1), (bx2, by2),
             self._bg_color,
-            -1,  # filled
+            -1,
         )
         cv2.addWeighted(
             overlay, self.background_alpha,
@@ -305,44 +407,105 @@ cdef class OSDOverlay:
             0, frame,
         )
 
-        # Text lines
+        # Text lines with shadow
         ty = y
         for line in lines:
-            cv2.putText(
-                frame, line,
-                (x, ty),
-                _FONT,
-                self.font_scale,
-                self._text_color,
-                self.font_thickness,
-                cv2.LINE_AA,
-            )
+            self._put_text_shadowed(frame, line, x, ty,
+                                    self.font_scale, color, self.font_thickness)
             ty += lh
+
+    cdef void _put_text_shadowed(self, object frame, str text, int x, int y,
+                                  double scale, object color, int thickness):
+        """
+        Draw text with a 1-pixel black shadow offset to (+1, +1), then draw
+        the text in `color` at (x, y).  This prevents washout over bright video.
+        """
+        cv2.putText(frame, text, (x + 1, y + 1), _FONT, scale,
+                    _BLACK, thickness + 1, cv2.LINE_AA)
+        cv2.putText(frame, text, (x, y), _FONT, scale,
+                    color, thickness, cv2.LINE_AA)
+
+    cdef void _draw_crosshair(self, object frame):
+        """
+        Draw a bright-green crosshair at the center of the frame.
+
+        A small gap around the center keeps the reticle clean.
+        """
+        cdef int fh = frame.shape[0]
+        cdef int fw = frame.shape[1]
+        cdef int cx = fw // 2
+        cdef int cy = fh // 2
+        cdef int arm = 20   # length of each arm
+        cdef int gap = 6    # gap between center and start of each arm
+
+        # Shadow pass
+        cv2.line(frame, (cx - arm - gap, cy), (cx - gap, cy), _BLACK, 3, cv2.LINE_AA)
+        cv2.line(frame, (cx + gap, cy), (cx + arm + gap, cy), _BLACK, 3, cv2.LINE_AA)
+        cv2.line(frame, (cx, cy - arm - gap), (cx, cy - gap), _BLACK, 3, cv2.LINE_AA)
+        cv2.line(frame, (cx, cy + gap), (cx, cy + arm + gap), _BLACK, 3, cv2.LINE_AA)
+
+        # Green lines
+        cv2.line(frame, (cx - arm - gap, cy), (cx - gap, cy), _GREEN, 2, cv2.LINE_AA)
+        cv2.line(frame, (cx + gap, cy), (cx + arm + gap, cy), _GREEN, 2, cv2.LINE_AA)
+        cv2.line(frame, (cx, cy - arm - gap), (cx, cy - gap), _GREEN, 2, cv2.LINE_AA)
+        cv2.line(frame, (cx, cy + gap), (cx, cy + arm + gap), _GREEN, 2, cv2.LINE_AA)
+
+    cdef void _draw_target_panel(self, object frame):
+        """Draw the target/POI information panel at the bottom-right."""
+        cdef int fh = frame.shape[0]
+        cdef int fw = frame.shape[1]
+        cdef list lines = self._build_target_lines()
+
+        if not lines:
+            return
+
+        cdef int lh  = int(30 * self.font_scale)
+        cdef int pad = 8
+
+        # Measure panel width
+        cdef int max_width = 0
+        cdef int w, h
+        for line in lines:
+            (w, h), _ = cv2.getTextSize(line, _FONT, self.font_scale, self.font_thickness)
+            if w > max_width:
+                max_width = w
+
+        cdef int panel_height = lh * len(lines) + pad * 2
+        cdef int panel_width  = max_width + pad * 2
+
+        # Bottom-right placement (10 px margin from edges)
+        cdef int x = fw - panel_width - 10
+        cdef int y = fh - panel_height - 10 + lh  # y is baseline of first line
+
+        self._draw_text_box(frame, lines, x, y, text_color=_MAGENTA)
 
     cdef void _draw_compass_widget(self, object frame, int cx, int cy,
                                    int radius, double track_deg,
                                    double camera_yaw_deg):
         """
-        Draw the compass widget: a ring with aircraft-track and camera-aim arrows.
+        Draw the compass widget: a ring with aircraft symbol and camera-aim arrow.
 
         The compass is north-up (geographic).
-        - White arrow: GPS ground track (where the aircraft is flying).
+        - White detailed aircraft outline: fuselage + wings + tail, oriented to
+          GPS ground track direction.
         - Yellow arrow: absolute camera aim direction (track + camera_yaw_deg).
-        Both arrows are suppressed when the relevant value is NaN.
+        - Prominent "N" label at top of ring.
+        - Tick marks at N / E / S / W.
+        - Text labels below: Trk (True) and Cam offset.
 
         Args:
             frame:          BGR numpy frame (modified in-place).
             cx, cy:         Centre pixel of the compass circle.
             radius:         Outer radius of the compass ring in pixels.
             track_deg:      GPS ground track (degrees from north, clockwise).
-                            NaN → white arrow suppressed, ring dims.
+                            NaN → aircraft symbol suppressed, ring dims.
             camera_yaw_deg: Camera yaw offset from nose (degrees, + = right).
                             NaN → yellow arrow suppressed.
         """
         cdef double pi = math.pi
         cdef double track_rad, cam_abs_rad
-        cdef int ax, ay, cax, cay, ix, iy, ox, oy, tx, ty
-        cdef int inner_r, outer_r, arrow_len, cam_len
+        cdef int cax, cay, ix, iy, ox, oy, tx, ty
+        cdef int inner_r, outer_r, cam_len
         cdef bint have_track, have_cam
         cdef object bg_overlay
         cdef double card_rad
@@ -351,30 +514,23 @@ cdef class OSDOverlay:
         have_track = not math.isnan(track_deg)
         have_cam   = have_track and not math.isnan(camera_yaw_deg)
 
-        # ------------------------------------------------------------------
-        # Semi-transparent background disc
-        # ------------------------------------------------------------------
+        # Background disc
         bg_overlay = frame.copy()
-        cv2.circle(bg_overlay, (cx, cy), radius + 12, (0, 0, 0), -1)
-        cv2.addWeighted(bg_overlay, 0.55, frame, 0.45, 0, frame)
+        cv2.circle(bg_overlay, (cx, cy), radius + 14, _BLACK, -1)
+        cv2.addWeighted(bg_overlay, 0.58, frame, 0.42, 0, frame)
 
-        # ------------------------------------------------------------------
-        # Compass ring colour: bright when we have a fix, dimmed otherwise
-        # ------------------------------------------------------------------
-        ring_color = (180, 180, 180) if have_track else (80, 80, 80)
-        cv2.circle(frame, (cx, cy), radius, ring_color, 1, cv2.LINE_AA)
+        # Ring — brighter when fix available, thicker
+        ring_color = (200, 200, 200) if have_track else (70, 70, 70)
+        cv2.circle(frame, (cx, cy), radius, ring_color, 2, cv2.LINE_AA)
 
-        # ------------------------------------------------------------------
-        # Cardinal tick marks (N / E / S / W)  and "N" label
-        # ------------------------------------------------------------------
+        # Cardinal tick marks + prominent "N" label
         cardinal_angles = [0.0, 90.0, 180.0, 270.0]
-        cardinal_labels = ["N", None, None, None]
-
+        cardinal_labels = ["N", "E", "S", "W"]
         for i in range(4):
             card_rad = cardinal_angles[i] * pi / 180.0
             s = math.sin(card_rad)
             c = math.cos(card_rad)
-            inner_r = radius - 5
+            inner_r = radius - 7
             outer_r = radius
             ix = int(cx + inner_r * s)
             iy = int(cy - inner_r * c)
@@ -382,107 +538,125 @@ cdef class OSDOverlay:
             oy = int(cy - outer_r * c)
             cv2.line(frame, (ix, iy), (ox, oy), ring_color, 2, cv2.LINE_AA)
 
-            if cardinal_labels[i] is not None:
-                tx = int(cx + (outer_r + 8) * s) - 4
-                ty = int(cy - (outer_r + 8) * c) + 4
-                cv2.putText(frame, "N", (tx, ty),
-                            _FONT, 0.38, ring_color, 1, cv2.LINE_AA)
+            lbl = cardinal_labels[i]
+            lscale = 0.55 if i == 0 else 0.38
+            lthick = 2    if i == 0 else 1
+            lcolor = _YELLOW if i == 0 else ring_color
+            tx = int(cx + (outer_r + 10) * s) - 5
+            ty = int(cy - (outer_r + 10) * c) + 5
+            self._put_text_shadowed(frame, lbl, tx, ty, lscale, lcolor, lthick)
 
-        # ------------------------------------------------------------------
-        # Aircraft travel direction arrow  (white)
-        # ------------------------------------------------------------------
+        # Aircraft symbol: detailed outline (nose + fuselage + wings + tail)
+        # drawn relative to track_deg (nose points in track direction)
         if have_track:
             track_rad = track_deg * pi / 180.0
-            arrow_len = int(radius * 0.82)
-            ax = int(cx + arrow_len * math.sin(track_rad))
-            ay = int(cy - arrow_len * math.cos(track_rad))
-            cv2.arrowedLine(
-                frame, (cx, cy), (ax, ay),
-                (255, 255, 255), 2, cv2.LINE_AA, tipLength=0.28,
-            )
+            sin_t = math.sin(track_rad)
+            cos_t = math.cos(track_rad)
 
-        # ------------------------------------------------------------------
-        # Camera aim direction arrow  (yellow = (0, 255, 255) in BGR)
-        # ------------------------------------------------------------------
+            def _rot(dx, dy):
+                """Rotate (dx, dy) by track_rad and offset to compass center."""
+                return (int(cx + dx * sin_t + dy * cos_t),
+                        int(cy - dx * cos_t + dy * sin_t))
+
+            # Fuselage: from nose (+r*0.75 forward) to tail (-r*0.65 back)
+            nose  = _rot(0, -int(radius * 0.75))
+            tail  = _rot(0,  int(radius * 0.65))
+            cv2.line(frame, nose, tail, _BLACK, 4, cv2.LINE_AA)
+            cv2.line(frame, nose, tail, _WHITE, 2, cv2.LINE_AA)
+
+            # Wings: swept back from mid-fuselage
+            mid   = _rot(0,  int(radius * 0.05))
+            wl    = _rot(-int(radius * 0.72), int(radius * 0.22))
+            wr    = _rot( int(radius * 0.72), int(radius * 0.22))
+            cv2.line(frame, mid, wl, _BLACK, 4, cv2.LINE_AA)
+            cv2.line(frame, mid, wl, _WHITE, 2, cv2.LINE_AA)
+            cv2.line(frame, mid, wr, _BLACK, 4, cv2.LINE_AA)
+            cv2.line(frame, mid, wr, _WHITE, 2, cv2.LINE_AA)
+
+            # Tail: small horizontal bar near the tail
+            tc    = _rot(0,  int(radius * 0.55))
+            tl    = _rot(-int(radius * 0.28), int(radius * 0.55))
+            tr    = _rot( int(radius * 0.28), int(radius * 0.55))
+            cv2.line(frame, tl, tr, _BLACK, 4, cv2.LINE_AA)
+            cv2.line(frame, tl, tr, _WHITE, 2, cv2.LINE_AA)
+
+        # Camera aim arrow (yellow)
         if have_cam:
             cam_abs_deg = track_deg + camera_yaw_deg
             cam_abs_rad = cam_abs_deg * pi / 180.0
             cam_len = int(radius * 0.62)
             cax = int(cx + cam_len * math.sin(cam_abs_rad))
             cay = int(cy - cam_len * math.cos(cam_abs_rad))
-            cv2.arrowedLine(
-                frame, (cx, cy), (cax, cay),
-                (0, 255, 255), 2, cv2.LINE_AA, tipLength=0.33,
-            )
+            cv2.arrowedLine(frame, (cx, cy), (cax, cay),
+                            _BLACK, 4, cv2.LINE_AA, tipLength=0.33)
+            cv2.arrowedLine(frame, (cx, cy), (cax, cay),
+                            _YELLOW, 2, cv2.LINE_AA, tipLength=0.33)
 
-        # ------------------------------------------------------------------
         # Text labels below the ring
-        # ------------------------------------------------------------------
-        label_y = cy + radius + 16
+        label_y = cy + radius + 18
         label_x = cx - radius
 
         if have_track:
-            trk_str = f"Trk:{track_deg:05.1f}"
-            cv2.putText(frame, trk_str, (label_x, label_y),
-                        _FONT, 0.40, (255, 255, 255), 1, cv2.LINE_AA)
-            label_y += 16
+            trk_str = f"Trk:{track_deg:05.1f} (True)"
+            self._put_text_shadowed(frame, trk_str, label_x, label_y,
+                                    0.38, _WHITE, 1)
+            label_y += 15
 
         if have_cam:
-            sign = "+" if camera_yaw_deg >= 0 else ""
+            sign    = "+" if camera_yaw_deg >= 0 else ""
             cam_str = f"Cam:{sign}{camera_yaw_deg:05.1f}"
-            cv2.putText(frame, cam_str, (label_x, label_y),
-                        _FONT, 0.40, (0, 255, 255), 1, cv2.LINE_AA)
+            self._put_text_shadowed(frame, cam_str, label_x, label_y,
+                                    0.38, _YELLOW, 1)
 
     cdef void _draw_heading_tape(self, object frame, double camera_heading_deg):
         """
-        Draw horizontal scrolling heading tape at top center.
-        
-        Shows camera absolute heading with ±15° field of view (configurable).
-        Displays tick marks, numerical labels, and cardinal directions.
-        
+        Draw horizontal scrolling heading tape at top center (bright green).
+
+        Shows camera absolute heading with ±half-FOV field of view.
+        Tick marks, numerical labels, and cardinal directions are all green
+        with black shadows.  The center heading box is larger to fit the text.
+
         Args:
-            frame: BGR numpy array (H × W × 3)
-            camera_heading_deg: Absolute camera heading in degrees (0-360)
+            frame:               BGR numpy array (H × W × 3).
+            camera_heading_deg:  Absolute camera heading in degrees (0–360).
         """
         cdef int frame_height = frame.shape[0]
-        cdef int frame_width = frame.shape[1]
-        
-        # Calculate tape dimensions
+        cdef int frame_width  = frame.shape[1]
+
         cdef int tape_height = int(frame_height * self.heading_tape_height_pct)
-        cdef int tape_width = int(frame_width * self.heading_tape_width_pct)
+        cdef int tape_width  = int(frame_width  * self.heading_tape_width_pct)
         cdef int tape_x = (frame_width - tape_width) // 2
         cdef int tape_y = int(frame_height * 0.02)
-        
-        # Ensure minimum size
+
         if tape_height < 20 or tape_width < 100:
             return
-        
-        # Draw semi-transparent background
+
+        # Semi-transparent background
         cdef object overlay = frame.copy()
         cv2.rectangle(overlay, (tape_x, tape_y),
-                     (tape_x + tape_width, tape_y + tape_height),
-                     self._bg_color, -1)
-        cv2.addWeighted(overlay, self.background_alpha, frame, 1.0 - self.background_alpha,
-                       0, frame)
-        
-        # Draw border
+                      (tape_x + tape_width, tape_y + tape_height),
+                      self._bg_color, -1)
+        cv2.addWeighted(overlay, self.background_alpha,
+                        frame, 1.0 - self.background_alpha, 0, frame)
+
+        # Green border with shadow
+        cv2.rectangle(frame, (tape_x - 1, tape_y - 1),
+                      (tape_x + tape_width + 1, tape_y + tape_height + 1),
+                      _BLACK, 3)
         cv2.rectangle(frame, (tape_x, tape_y),
-                     (tape_x + tape_width, tape_y + tape_height),
-                     self._text_color, 1)
-        
-        # Calculate degree range
-        cdef double half_fov = self.heading_tape_fov_deg / 2.0
+                      (tape_x + tape_width, tape_y + tape_height),
+                      _GREEN, 2)
+
+        cdef double half_fov         = self.heading_tape_fov_deg / 2.0
         cdef double degrees_per_pixel = self.heading_tape_fov_deg / float(tape_width)
         cdef int tape_center_x = tape_x + tape_width // 2
-        
-        # Tick mark dimensions
-        cdef int tick_y_top = tape_y + 2
-        cdef int short_tick_height = 5
-        cdef int long_tick_height = 10
-        cdef int tick_y_short = tick_y_top + short_tick_height
-        cdef int tick_y_long = tick_y_top + long_tick_height
-        
-        # Draw tick marks and labels
+
+        cdef int tick_y_top    = tape_y + 3
+        cdef int short_tick_h  = 5
+        cdef int long_tick_h   = 12
+        cdef int tick_y_short  = tick_y_top + short_tick_h
+        cdef int tick_y_long   = tick_y_top + long_tick_h
+
         cdef int deg
         cdef double angular_offset
         cdef int x_pos
@@ -490,101 +664,92 @@ cdef class OSDOverlay:
         cdef int text_width, text_height
         cdef int text_x, text_y
         cdef object text_size
-        cdef int baseline
-        
-        # Iterate through visible degree range
+
         cdef int min_deg = int(camera_heading_deg - half_fov - 1)
         cdef int max_deg = int(camera_heading_deg + half_fov + 2)
-        
+
         for deg in range(min_deg, max_deg + 1):
-            # Normalize to 0-359
             normalized_deg = deg % 360
-            
-            # Calculate angular offset from camera heading (shortest path)
+
             angular_offset = normalized_deg - camera_heading_deg
             if angular_offset > 180:
                 angular_offset -= 360
             elif angular_offset < -180:
                 angular_offset += 360
-            
-            # Skip if outside visible range
+
             if abs(angular_offset) > half_fov:
                 continue
-            
-            # Calculate x position
+
             x_pos = int(tape_center_x + angular_offset / degrees_per_pixel)
-            
-            # Skip if outside tape bounds
             if x_pos < tape_x or x_pos > tape_x + tape_width:
                 continue
-            
-            # Draw tick marks
+
             if normalized_deg % 5 == 0:
-                # Long tick every 5 degrees
-                cv2.line(frame, (x_pos, tick_y_top), (x_pos, tick_y_long),
-                        self._text_color, 1)
-                
-                # Add numerical label
+                # Shadow then green tick
+                cv2.line(frame, (x_pos + 1, tick_y_top + 1), (x_pos + 1, tick_y_long + 1),
+                         _BLACK, 2)
+                cv2.line(frame, (x_pos, tick_y_top), (x_pos, tick_y_long), _GREEN, 2)
+
                 label_text = f"{normalized_deg:03d}"
-                text_size = cv2.getTextSize(label_text, _FONT, 0.35, 1)
-                text_width = text_size[0][0]
+                text_size  = cv2.getTextSize(label_text, _FONT, 0.40, 1)
+                text_width  = text_size[0][0]
                 text_height = text_size[0][1]
                 text_x = x_pos - text_width // 2
                 text_y = tick_y_long + text_height + 2
-                
-                cv2.putText(frame, label_text, (text_x, text_y),
-                           _FONT, 0.35, self._text_color, 1, cv2.LINE_AA)
-                
-                # Add cardinal direction label if applicable
-                if normalized_deg == 0:
-                    cv2.putText(frame, "N", (x_pos - 4, text_y + 14),
-                               _FONT, 0.35, self._text_color, 1, cv2.LINE_AA)
-                elif normalized_deg == 90:
-                    cv2.putText(frame, "E", (x_pos - 3, text_y + 14),
-                               _FONT, 0.35, self._text_color, 1, cv2.LINE_AA)
-                elif normalized_deg == 180:
-                    cv2.putText(frame, "S", (x_pos - 3, text_y + 14),
-                               _FONT, 0.35, self._text_color, 1, cv2.LINE_AA)
-                elif normalized_deg == 270:
-                    cv2.putText(frame, "W", (x_pos - 5, text_y + 14),
-                               _FONT, 0.35, self._text_color, 1, cv2.LINE_AA)
+                self._put_text_shadowed(frame, label_text, text_x, text_y,
+                                        0.40, _GREEN, 1)
+
+                # Cardinal label
+                cardinal = {0: "N", 90: "E", 180: "S", 270: "W"}.get(normalized_deg)
+                if cardinal is not None:
+                    self._put_text_shadowed(frame, cardinal,
+                                            x_pos - 4, text_y + 14,
+                                            0.45, _GREEN, 2)
             else:
-                # Short tick every 1 degree
-                cv2.line(frame, (x_pos, tick_y_top), (x_pos, tick_y_short),
-                        self._text_color, 1)
-        
-        # Draw center chevron (downward pointing triangle)
-        cdef int chevron_size = 6
-        cdef int chevron_y = tape_y + tape_height - 2
-        cdef object chevron_pts = [[tape_center_x, chevron_y],
-                                   [tape_center_x - chevron_size, chevron_y - chevron_size],
-                                   [tape_center_x + chevron_size, chevron_y - chevron_size]]
-        import numpy as np
-        cv2.fillPoly(frame, [np.array(chevron_pts, dtype=np.int32)], self._text_color)
-        
-        # Draw center heading value box
+                cv2.line(frame, (x_pos + 1, tick_y_top + 1), (x_pos + 1, tick_y_short + 1),
+                         _BLACK, 1)
+                cv2.line(frame, (x_pos, tick_y_top), (x_pos, tick_y_short), _GREEN, 1)
+
+        # Center chevron (inverted triangle, green)
+        cdef int chevron_size = 7
+        cdef int chevron_y    = tape_y + tape_height - 2
+        import numpy as _np
+        chevron_pts = _np.array(
+            [[tape_center_x, chevron_y],
+             [tape_center_x - chevron_size, chevron_y - chevron_size],
+             [tape_center_x + chevron_size, chevron_y - chevron_size]],
+            dtype=_np.int32,
+        )
+        cv2.fillPoly(frame, [chevron_pts], _BLACK)
+        # slightly smaller green fill on top
+        inner_pts = _np.array(
+            [[tape_center_x, chevron_y - 1],
+             [tape_center_x - chevron_size + 1, chevron_y - chevron_size + 1],
+             [tape_center_x + chevron_size - 1, chevron_y - chevron_size + 1]],
+            dtype=_np.int32,
+        )
+        cv2.fillPoly(frame, [inner_pts], _GREEN)
+
+        # Heading value box — wider/taller so the degree symbol fits
         cdef str heading_str = f"{int(camera_heading_deg) % 360:03d}\u00b0"
-        text_size = cv2.getTextSize(heading_str, _FONT, 0.45, 1)
-        cdef int box_width = text_size[0][0] + 8
-        cdef int box_height = text_size[0][1] + 6
-        cdef int box_x = tape_center_x - box_width // 2
+        text_size  = cv2.getTextSize(heading_str, _FONT, 0.50, 2)
+        cdef int box_w = text_size[0][0] + 16
+        cdef int box_h = text_size[0][1] + 10
+        cdef int box_x = tape_center_x - box_w // 2
         cdef int box_y = tape_y + tape_height + 2
-        
-        # Draw box background
+
         overlay = frame.copy()
-        cv2.rectangle(overlay, (box_x, box_y),
-                     (box_x + box_width, box_y + box_height),
-                     self._bg_color, -1)
-        cv2.addWeighted(overlay, self.background_alpha, frame, 1.0 - self.background_alpha,
-                       0, frame)
-        
-        # Draw box border and text
-        cv2.rectangle(frame, (box_x, box_y),
-                     (box_x + box_width, box_y + box_height),
-                     self._text_color, 1)
-        cv2.putText(frame, heading_str,
-                   (box_x + 4, box_y + box_height - 3),
-                   _FONT, 0.45, self._text_color, 1, cv2.LINE_AA)
+        cv2.rectangle(overlay, (box_x, box_y), (box_x + box_w, box_y + box_h),
+                      self._bg_color, -1)
+        cv2.addWeighted(overlay, self.background_alpha,
+                        frame, 1.0 - self.background_alpha, 0, frame)
+        # Black border shadow, then green border
+        cv2.rectangle(frame, (box_x - 1, box_y - 1),
+                      (box_x + box_w + 1, box_y + box_h + 1), _BLACK, 3)
+        cv2.rectangle(frame, (box_x, box_y), (box_x + box_w, box_y + box_h), _GREEN, 2)
+        self._put_text_shadowed(frame, heading_str,
+                                box_x + 8, box_y + box_h - 4,
+                                0.50, _GREEN, 2)
 
     cpdef void close(self):
         """Release OSD resources and close the attached video sink."""

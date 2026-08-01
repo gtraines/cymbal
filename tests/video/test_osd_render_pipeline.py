@@ -8,6 +8,7 @@ Tests that validate end-to-end OSD rendering:
   - render_frame() is a no-op when OSD is disabled
   - telemetry flows through the full pipeline to the frame
   - numpy array frames get a pixel written (when numpy available)
+  - target panel shown only when POI is locked
 
 These tests use the pure-Python OSDOverlay from osd_test_helpers and a
 capturing HeadlessSink to avoid any hardware or display dependency.
@@ -135,7 +136,58 @@ class TestOSDRenderPipeline(unittest.TestCase):
         frame = {}
         osd.render_frame(frame)
         lines = frame.get('lines', [])
-        self.assertEqual(lines[0], "09:15:30 UTC")
+        self.assertEqual(lines[1], "09:15:30 UTC")
+
+    # ------------------------------------------------------------------
+    # Target panel visibility
+    # ------------------------------------------------------------------
+
+    def test_target_panel_not_shown_when_unlocked(self):
+        osd, sink = make_osd(time_fn=fixed_time())
+        fill_telemetry(osd)
+        # poi_locked defaults to False — no target panel
+        frame = {}
+        osd.render_frame(frame)
+        self.assertNotIn('target_lines', frame)
+
+    def test_target_panel_shown_when_locked(self):
+        osd, sink = make_osd(time_fn=fixed_time())
+        fill_telemetry(osd)
+        osd.update_target(
+            poi_locked=True, poi_lat=33.39100, poi_lon=-111.81900,
+            poi_alt_msl=380.0, slant_range_m=500.0, poi_address="Mesa, AZ",
+        )
+        frame = {}
+        osd.render_frame(frame)
+        self.assertIn('target_lines', frame)
+        tgt = frame['target_lines']
+        self.assertTrue(any("TARGET" in l for l in tgt))
+        self.assertTrue(any("33.39100" in l for l in tgt))
+
+    def test_target_panel_shows_slant_range_in_feet(self):
+        osd, sink = make_osd(time_fn=fixed_time())
+        fill_telemetry(osd)
+        osd.update_target(
+            poi_locked=True, poi_lat=33.39100, poi_lon=-111.81900,
+            poi_alt_msl=380.0, slant_range_m=500.0, poi_address="",
+        )
+        frame = {}
+        osd.render_frame(frame)
+        tgt = frame['target_lines']
+        # 500 m × 3.28084 = 1640.42 ft → rounds to 1640
+        self.assertTrue(
+            any("1640" in l for l in tgt),
+            f"Expected feet value in target lines: {tgt}"
+        )
+
+    def test_target_panel_unlocked_after_update(self):
+        osd, sink = make_osd(time_fn=fixed_time())
+        fill_telemetry(osd)
+        osd.update_target(True, 33.391, -111.819, 380.0, 500.0, "")
+        osd.update_target(False, float('nan'), float('nan'), float('nan'), float('nan'), "")
+        frame = {}
+        osd.render_frame(frame)
+        self.assertNotIn('target_lines', frame)
 
     # ------------------------------------------------------------------
     # numpy frame path (when numpy is available)
@@ -151,7 +203,6 @@ class TestOSDRenderPipeline(unittest.TestCase):
         fill_telemetry(osd)
         frame = np.zeros((480, 640, 3), dtype='uint8')
         osd.render_frame(frame)
-        # The test stub writes a white dot at [5,5]
         self.assertFalse(
             (frame == 0).all(),
             "Frame should be non-zero after render_frame()"

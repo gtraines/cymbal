@@ -19,6 +19,10 @@ import types
 
 _NAN = float('nan')
 
+# Unit conversion factors (SI → Imperial, display-only) — must match pyx
+_M_TO_FT   = 3.28084
+_MS_TO_MPH = 2.23694
+
 
 class OSDOverlay:
     """
@@ -30,8 +34,8 @@ class OSDOverlay:
 
     def __init__(self, config=None, time_fn=None):
         self.enabled            = True
-        self.font_scale         = 0.6
-        self.font_thickness     = 1
+        self.font_scale         = 0.65
+        self.font_thickness     = 2
         self._text_color        = (255, 255, 255)
         self._bg_color          = (0, 0, 0)
         self.background_alpha   = 0.5
@@ -46,9 +50,11 @@ class OSDOverlay:
         self._video_sink = None
         self._time_fn    = time_fn if time_fn is not None else datetime.datetime.utcnow
 
+        # Aircraft telemetry
         self.lat            = _NAN
         self.lon            = _NAN
         self.alt_agl        = _NAN
+        self.alt_msl        = _NAN
         self.groundspeed_ms = _NAN
         self.address        = "No fix"
         self.fix_quality    = 0
@@ -56,6 +62,14 @@ class OSDOverlay:
         self.sbus_channels  = []
         self.track_degrees  = _NAN
         self.camera_yaw_deg = _NAN
+
+        # Target / POI
+        self.poi_locked     = False
+        self.poi_lat        = _NAN
+        self.poi_lon        = _NAN
+        self.poi_alt_msl    = _NAN
+        self.slant_range_ft = _NAN
+        self.poi_address    = ""
 
         if config is not None:
             self._apply_config(config)
@@ -94,10 +108,12 @@ class OSDOverlay:
         lat, lon, alt_agl, groundspeed, address,
         fix_quality, satellites, sbus_channels,
         track_degrees, camera_yaw_deg,
+        alt_msl=_NAN,
     ):
         self.lat            = lat
         self.lon            = lon
         self.alt_agl        = alt_agl
+        self.alt_msl        = alt_msl
         self.groundspeed_ms = groundspeed
         self.address        = address
         self.fix_quality    = fix_quality
@@ -105,6 +121,18 @@ class OSDOverlay:
         self.sbus_channels  = sbus_channels
         self.track_degrees  = track_degrees
         self.camera_yaw_deg = camera_yaw_deg
+
+    def update_target(self, poi_locked, poi_lat, poi_lon, poi_alt_msl,
+                      slant_range_m, poi_address):
+        self.poi_locked  = poi_locked
+        self.poi_lat     = poi_lat
+        self.poi_lon     = poi_lon
+        self.poi_alt_msl = poi_alt_msl
+        if not math.isnan(slant_range_m):
+            self.slant_range_ft = slant_range_m * _M_TO_FT
+        else:
+            self.slant_range_ft = _NAN
+        self.poi_address = poi_address
 
     def render_frame(self, frame):
         """
@@ -120,7 +148,9 @@ class OSDOverlay:
         # Mark the frame so tests can detect that render_frame ran
         if isinstance(frame, dict):
             frame['annotated'] = True
-            frame['lines']     = self._build_lines()
+            frame['lines']     = self._build_aircraft_lines()
+            if self.poi_locked:
+                frame['target_lines'] = self._build_target_lines()
         else:
             # numpy array path
             try:
@@ -131,8 +161,12 @@ class OSDOverlay:
         if self._video_sink is not None:
             self._video_sink.write_frame(frame)
 
-    def _build_lines(self):
+    def _build_aircraft_lines(self):
+        """Assemble the aircraft panel text lines (Imperial units for display)."""
         lines = []
+
+        # Panel header
+        lines.append("\u2500\u2500 AIRCRAFT \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
 
         # Timestamp via injected callable
         ts = self._time_fn().strftime("%H:%M:%S UTC")
@@ -147,15 +181,15 @@ class OSDOverlay:
         else:
             lines.append("GPS: No fix")
 
-        # Altitude AGL
-        if not math.isnan(self.alt_agl):
-            lines.append(f"Alt AGL: {self.alt_agl:.1f} m")
-        else:
-            lines.append("Alt AGL: --")
+        # Altitude AGL in feet + GPS altitude MSL in feet
+        agl_str = f"{self.alt_agl * _M_TO_FT:.0f} ft" if not math.isnan(self.alt_agl) else "--"
+        msl_str = f"{self.alt_msl * _M_TO_FT:.0f} ft" if not math.isnan(self.alt_msl) else "--"
+        lines.append(f"Alt AGL: {agl_str}  GPS Alt: {msl_str}")
 
-        # Ground speed
+        # Groundspeed in mph
         if not math.isnan(self.groundspeed_ms):
-            lines.append(f"GndSpd: {self.groundspeed_ms:.1f} m/s")
+            spd_mph = self.groundspeed_ms * _MS_TO_MPH
+            lines.append(f"GndSpd: {spd_mph:.1f} mph  (True)")
         else:
             lines.append("GndSpd: --")
 
@@ -172,6 +206,39 @@ class OSDOverlay:
             lines.append(f"SBUS[9-16]: {row2}")
 
         return lines
+
+    def _build_target_lines(self):
+        """Assemble the target panel text lines (Imperial units for display)."""
+        if not self.poi_locked:
+            return []
+
+        lines = []
+        lines.append("\u2500\u2500 TARGET \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
+
+        if not math.isnan(self.poi_lat) and not math.isnan(self.poi_lon):
+            lines.append(f"Lat: {self.poi_lat:.5f}  Lon: {self.poi_lon:.5f}")
+        else:
+            lines.append("Lat: --  Lon: --")
+
+        if not math.isnan(self.poi_alt_msl):
+            elev_ft = self.poi_alt_msl * _M_TO_FT
+            lines.append(f"Elev: {elev_ft:.0f} ft MSL")
+        else:
+            lines.append("Elev: --")
+
+        if not math.isnan(self.slant_range_ft):
+            lines.append(f"Slant Range: {self.slant_range_ft:.0f} ft")
+        else:
+            lines.append("Slant Range: --")
+
+        if self.poi_address:
+            lines.append(self.poi_address)
+
+        return lines
+
+    # Keep _build_lines as an alias for backward compatibility
+    def _build_lines(self):
+        return self._build_aircraft_lines()
 
     def close(self):
         if self._video_sink is not None:
@@ -248,6 +315,7 @@ def fill_telemetry(osd, **overrides):
         lat=33.41520,
         lon=-111.83150,
         alt_agl=152.3,
+        alt_msl=450.0,
         groundspeed=28.4,
         address="1234 E Main St, Mesa, AZ 85201",
         fix_quality=1,
@@ -258,3 +326,4 @@ def fill_telemetry(osd, **overrides):
     )
     defaults.update(overrides)
     osd.update_telemetry(**defaults)
+
