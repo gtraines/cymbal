@@ -35,6 +35,13 @@ cdef class CymbalController:
     cdef public double poi_lat
     cdef public double poi_lon
 
+    # POI state publishing (controller → video sidecar)
+    cdef object _poi_sock          # UNIX datagram socket, bound to SOCKET_CONTROLLER_PATH
+    cdef object _poi_terrain_db    # TerrainElevationDB for POI elevation queries (optional)
+    cdef public double _poi_alt_msl     # cached POI terrain elevation, metres MSL
+    cdef public double _slant_range_m   # cached 3D aircraft→POI slant range, metres
+    cdef double _last_poi_elev_t   # monotonic time of last POI elevation query
+
     # Cached telemetry
     cdef public str current_address
     cdef public int current_mode
@@ -69,6 +76,7 @@ cdef class CymbalController:
     cdef void _init_telemetry_provider(self)
     cdef void _init_sbus(self)
     cdef void _init_channel_mapper(self)
+    cdef void _init_poi_publisher(self)
     cdef void _apply_control_mode(self)
     cdef void _apply_manual_mode(self)
     cdef void _apply_legacy_commands(self, dict cmds)
@@ -79,3 +87,5 @@ cdef class CymbalController:
     cdef void _point_all_gimbals(self, double pitch, double yaw)
     cdef void _lock_poi(self, double lat, double lon)
     cdef void _sleep_to_interval(self, double t_start, double interval)
+    cdef void _publish_controller_state(self)
+    cdef double _query_poi_elevation(self)

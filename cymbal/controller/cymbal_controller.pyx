@@ -55,6 +55,8 @@ Usage::
 import math
 import time
 import logging
+import os
+import socket as _socket_mod
 
 from cymbal.controller.telemetry_provider cimport TelemetryProvider, InProcessTelemetryProvider
 from cymbal.controller.telemetry_provider import InProcessTelemetryProvider as _InProcessTelemetryPy
@@ -62,6 +64,7 @@ from cymbal.inputs.sbus_reader cimport SBUSReader
 from cymbal.inputs.sbus_reader import SBUSReader
 from cymbal.inputs.channel_mapper cimport ChannelMapper
 from cymbal.inputs.channel_mapper import ChannelMapper, MODE_MANUAL, MODE_STABILIZE, MODE_TRACK
+from cymbal.controller.ipc_schemas import ControllerStateSchema, SOCKET_CONTROLLER_PATH
 from libc.math cimport atan2, sqrt, cos, M_PI, isnan
 
 _DEG_TO_RAD     = M_PI / 180.0
@@ -98,6 +101,13 @@ cdef class CymbalController:
         self.poi_lat          = 0.0
         self.poi_lon          = 0.0
         self.current_address  = "No fix"
+
+        # POI state publishing
+        self._poi_sock        = None
+        self._poi_terrain_db  = None
+        self._poi_alt_msl     = float('nan')
+        self._slant_range_m   = float('nan')
+        self._last_poi_elev_t = 0.0
         self.current_mode     = MODE_MANUAL
         self._last_camera_yaw = float('nan')
 
@@ -130,6 +140,7 @@ cdef class CymbalController:
             self._init_telemetry_provider()
             self._init_sbus()
             self._init_channel_mapper()
+            self._init_poi_publisher()
 
             active = [g for g in self.gimbals if g is not None]
             if not active:
@@ -218,6 +229,49 @@ cdef class CymbalController:
             self.logger.warning(f"ChannelMapper init error: {e}")
             self.channel_mapper = None
 
+    cdef void _init_poi_publisher(self):
+        """
+        Open a UNIX datagram socket for publishing ControllerState datagrams.
+
+        The video sidecar subscribes to SOCKET_CONTROLLER_PATH + '.reader' to
+        receive POI/target data each control loop iteration.  Failure is
+        non-fatal: if the socket cannot be created (e.g. on Windows or when
+        /run/cymbal is not writable), poi publishing is silently disabled.
+        """
+        try:
+            sock_path = SOCKET_CONTROLLER_PATH
+            sock_dir  = os.path.dirname(sock_path)
+            if sock_dir:
+                os.makedirs(sock_dir, exist_ok=True)
+            if os.path.exists(sock_path):
+                os.unlink(sock_path)
+            sock = _socket_mod.socket(_socket_mod.AF_UNIX, _socket_mod.SOCK_DGRAM)
+            sock.bind(sock_path)
+            sock.setblocking(False)
+            self._poi_sock = sock
+            self.logger.info(f"CymbalController: POI publisher bound to {sock_path}")
+        except Exception as e:
+            self.logger.warning(
+                f"CymbalController: POI publisher unavailable ({e}); target OSD disabled"
+            )
+            self._poi_sock = None
+
+        # Initialize terrain DB for POI elevation queries (optional)
+        try:
+            gps_cfg = self.config.gps
+            if getattr(gps_cfg, 'use_terrain_db', False):
+                from cymbal.geo.terrain_elevation import TerrainElevationDB as _TerrainDB
+                db = _TerrainDB()
+                if db.initialize(gps_cfg.terrain_db_path):
+                    self._poi_terrain_db = db
+                    self.logger.info("CymbalController: POI terrain DB initialized")
+                else:
+                    self.logger.debug("CymbalController: POI terrain DB init returned False; "
+                                      "slant range will be unavailable")
+        except Exception as e:
+            self.logger.debug(f"CymbalController: POI terrain DB unavailable ({e})")
+            self._poi_terrain_db = None
+
     # ------------------------------------------------------------------
     # Main runtime loop
     # ------------------------------------------------------------------
@@ -280,6 +334,10 @@ cdef class CymbalController:
                         self.telemetry_provider.latitude,
                         self.telemetry_provider.longitude,
                     )
+
+            # ---- Publish controller state (POI) to video sidecar ----
+            if self._poi_sock is not None:
+                self._publish_controller_state()
 
             # ---- Gimbal commands (serial write ~1-2 ms, PWM ~0.1 ms) ----
             self._apply_control_mode()
@@ -593,6 +651,24 @@ cdef class CymbalController:
         if self.sbus:
             self.sbus.close()
 
+        # Close POI publisher socket
+        if self._poi_sock is not None:
+            try:
+                sock_path = SOCKET_CONTROLLER_PATH
+                self._poi_sock.close()
+                if os.path.exists(sock_path):
+                    os.unlink(sock_path)
+            except Exception:
+                pass
+            self._poi_sock = None
+
+        if self._poi_terrain_db is not None:
+            try:
+                self._poi_terrain_db.close()
+            except Exception:
+                pass
+            self._poi_terrain_db = None
+
         self.logger.info("CymbalController: shutdown complete")
 
     # ------------------------------------------------------------------
@@ -604,6 +680,85 @@ cdef class CymbalController:
         cdef double remaining = interval - elapsed
         if remaining > 0.0:
             time.sleep(remaining)
+
+    cdef double _query_poi_elevation(self):
+        """
+        Return terrain elevation (m MSL) at the locked POI coordinates.
+
+        Rate-limited to one query per 5 seconds to avoid blocking the
+        50 Hz control loop.  Returns the cached value between updates.
+        Returns NaN when terrain DB is unavailable.
+        """
+        cdef double now = time.monotonic()
+
+        if self._poi_terrain_db is None:
+            return float('nan')
+
+        # Return cached value if the last query was recent enough.
+        if (now - self._last_poi_elev_t < 5.0 and
+                not isnan(self._poi_alt_msl)):
+            return self._poi_alt_msl
+
+        try:
+            val = self._poi_terrain_db.get_elevation(self.poi_lat, self.poi_lon)
+            self._poi_alt_msl    = val
+            self._last_poi_elev_t = now
+            return val
+        except Exception:
+            return float('nan')
+
+    cdef void _publish_controller_state(self):
+        """
+        Pack and send a ControllerStateSchema datagram to the video sidecar.
+
+        Computes slant range when the POI is locked and aircraft position/
+        altitude and target terrain elevation are all available.
+        Non-blocking; send errors are silently dropped.
+        """
+        cdef double poi_alt, slant, d_north, d_east, d_horiz
+        cdef double ac_alt_msl, cos_lat
+        cdef double poi_lat_send, poi_lon_send
+
+        if self.poi_locked:
+            poi_lat_send = self.poi_lat
+            poi_lon_send = self.poi_lon
+            poi_alt      = self._query_poi_elevation()
+
+            tp = self.telemetry_provider
+            if (tp is not None and tp.has_fix
+                    and not isnan(tp.altitude_msl) and not isnan(poi_alt)):
+                ac_alt_msl = tp.altitude_msl
+                cos_lat    = cos(tp.latitude * _DEG_TO_RAD)
+                d_north    = (poi_lat_send - tp.latitude) * _METERS_PER_DEG
+                d_east     = (poi_lon_send - tp.longitude) * _METERS_PER_DEG * cos_lat
+                d_horiz    = sqrt(d_north * d_north + d_east * d_east)
+                slant      = sqrt(d_horiz * d_horiz +
+                                  (ac_alt_msl - poi_alt) * (ac_alt_msl - poi_alt))
+            else:
+                slant = float('nan')
+        else:
+            poi_lat_send = float('nan')
+            poi_lon_send = float('nan')
+            poi_alt      = float('nan')
+            slant        = float('nan')
+
+        self._slant_range_m = slant
+
+        reader_path = SOCKET_CONTROLLER_PATH + ".reader"
+        try:
+            payload = ControllerStateSchema.pack(
+                poi_locked    = self.poi_locked,
+                poi_lat       = poi_lat_send,
+                poi_lon       = poi_lon_send,
+                poi_alt_msl   = poi_alt,
+                slant_range_m = slant,
+                timestamp     = time.monotonic(),
+            )
+            self._poi_sock.sendto(payload, reader_path)
+        except FileNotFoundError:
+            pass  # reader socket not yet connected — normal at startup
+        except Exception as e:
+            self.logger.debug(f"CymbalController: controller state send error: {e}")
 
 
 # ---------------------------------------------------------------------------
