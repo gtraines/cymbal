@@ -1,7 +1,10 @@
 [Unit]
 Description=Cython Cymbal Airborne Gimbal Control System
-After=network.target pigpiod.service sbus-decoder.service
+Documentation=file:/home/pi/cymbal/docs/SERVICES.md
+After=network.target pigpiod.service sbus-decoder.service cymbal-telemetry.service cymbal-video.service
 Requires=pigpiod.service sbus-decoder.service
+# Soft dependencies: control starts even without the sidecars.
+Wants=cymbal-telemetry.service cymbal-video.service
 
 [Service]
 Type=simple
@@ -12,10 +15,22 @@ Environment="PYTHONUNBUFFERED=1"
 ExecStart=/usr/bin/python3 -m cymbal.main
 Restart=on-failure
 RestartSec=5s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
 StandardOutput=journal
 StandardError=journal
 
-# Security hardening (optional)
+# Resource policy:
+#   Nice=-10: highest priority among Cymbal services so gimbal actuation and
+#   failsafe handling are never starved by telemetry or video work.
+#   CPUAffinity=0 1: run on the same core pair as sbus-decoder so S-BUS socket
+#   drain and gimbal dispatch stay cache-warm together.
+#   MemoryMax=256M: covers Cython extensions, serial buffers, and channel mapper.
+Nice=-10
+CPUAffinity=0 1
+MemoryMax=256M
+
+# Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
 

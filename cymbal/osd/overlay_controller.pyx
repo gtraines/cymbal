@@ -56,13 +56,15 @@ cdef class OSDOverlay:
     All public fields are updated by update_telemetry(); render_frame()
     draws the cached values onto a frame buffer.  Both methods are safe to
     call from the same thread without locking.
+
+    Args:
+        config:   OSDConfig dataclass instance, or None for defaults.
+        time_fn:  Callable returning a datetime.datetime for the timestamp
+                  row.  Defaults to datetime.datetime.utcnow.  Override in
+                  tests for deterministic output.
     """
 
-    def __init__(self, config=None):
-        """
-        Args:
-            config: OSDConfig dataclass instance, or None for defaults.
-        """
+    def __init__(self, config=None, time_fn=None):
         self.enabled = True
         self.font_scale = 0.6
         self.font_thickness = 1
@@ -72,6 +74,9 @@ cdef class OSDOverlay:
         self.show_sbus_channels = False
         self.show_compass = True
         self.compass_radius = 45
+
+        self._video_sink = None
+        self._time_fn = time_fn if time_fn is not None else datetime.datetime.utcnow
 
         self.lat = _NAN
         self.lon = _NAN
@@ -98,9 +103,12 @@ cdef class OSDOverlay:
         self.show_compass = config.show_compass
         self.compass_radius = config.compass_radius
 
-    cpdef bint initialize(self):
+    cpdef bint initialize(self, object video_sink=None):
         """
-        Verify OpenCV is available.
+        Verify OpenCV is available and (optionally) attach a video sink.
+
+        Args:
+            video_sink: Optional VideoSink instance.  Defaults to HeadlessSink.
 
         Returns:
             True if OpenCV is usable, False otherwise.
@@ -111,6 +119,18 @@ cdef class OSDOverlay:
             self.enabled = False
             return False
         _FONT = cv2.FONT_HERSHEY_SIMPLEX
+
+        # Attach sink — default to headless
+        if video_sink is not None:
+            self._video_sink = video_sink
+        else:
+            try:
+                from cymbal.video.headless_sink import HeadlessSink
+                self._video_sink = HeadlessSink()
+                self._video_sink.initialize()
+            except Exception:
+                self._video_sink = None
+
         logger.info("OSDOverlay initialized")
         return True
 
@@ -177,12 +197,16 @@ cdef class OSDOverlay:
                 self.camera_yaw_deg,
             )
 
+        # Forward to the attached video sink (HeadlessSink by default)
+        if self._video_sink is not None:
+            self._video_sink.write_frame(frame)
+
     def _build_lines(self):
         """Assemble the list of text lines to display."""
         lines = []
 
-        # Timestamp
-        ts = datetime.datetime.utcnow().strftime("%H:%M:%S UTC")
+        # Timestamp — use injected callable for testability
+        ts = self._time_fn().strftime("%H:%M:%S UTC")
         lines.append(ts)
 
         # Address
@@ -391,7 +415,13 @@ cdef class OSDOverlay:
                         _FONT, 0.40, (0, 255, 255), 1, cv2.LINE_AA)
 
     cpdef void close(self):
-        """Release OSD resources."""
+        """Release OSD resources and close the attached video sink."""
+        if self._video_sink is not None:
+            try:
+                self._video_sink.close()
+            except Exception:
+                pass
+            self._video_sink = None
         logger.debug("OSDOverlay closed")
 
     def __enter__(self):

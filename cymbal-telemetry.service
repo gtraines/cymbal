@@ -1,0 +1,40 @@
+[Unit]
+Description=Cymbal Telemetry Sidecar — GPS, terrain, and address publisher
+Documentation=file:/home/pi/cymbal/docs/SERVICES.md
+After=pigpiod.service
+Wants=pigpiod.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/cymbal
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/usr/bin/python3 -m cymbal.telemetry.telemetry_service
+Restart=on-failure
+RestartSec=3s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+# Create /run/cymbal/ so the socket path exists before the service starts
+RuntimeDirectory=cymbal
+RuntimeDirectoryMode=0755
+StandardOutput=journal
+StandardError=journal
+
+# Resource policy:
+#   Nice=0: normal priority — GPS serial read and SQLite queries are
+#   background work and must not preempt the control process.
+#   CPUAffinity=2 3: isolate GPS/terrain/SQLite work to the second core pair
+#   so cache-heavy database reads don't evict control-loop data from L1/L2.
+#   MemoryMax=512M: SRTM tile data can occupy significant memory; SQLite
+#   page cache adds overhead; 512 M is a conservative upper bound.
+Nice=0
+CPUAffinity=2 3
+MemoryMax=512M
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,629 +1,229 @@
 """
-Main control application for dual gimbal system.
+Cymbal entry-point module.
 
-Coordinates control of both camera and spotlight gimbals from a Raspberry Pi 3B+,
-integrating GPS positioning, terrain elevation, offline reverse geocoding,
-S-BUS RC input, and on-screen display.
+This module is the thin process-level shell for the Cymbal gimbal system.
+It owns all process-global concerns:
+  - Signal handler installation (SIGINT / SIGTERM)
+  - logging.basicConfig() / log-file setup
+  - Building concrete GimbalBase objects from SystemConfig.gimbals
+  - Selecting and constructing the TelemetryProvider from config
+  - Constructing and running CymbalController
+
+Library users should import CymbalController directly from cymbal.controller
+and inject their own gimbal objects — do NOT call this module programmatically.
+
+Backward-compatibility:
+    The name ``GimbalController`` is re-exported here so existing code that
+    does ``from cymbal.main import GimbalController`` continues to work.
 """
 
-import math
-import time
 import logging
 import signal
 import sys
-from typing import Optional
 
-from cymbal.camera_gimbal.storm32_controller cimport Storm32Controller
-from cymbal.camera_gimbal.storm32_controller import Storm32Controller
-from cymbal.spotlight_gimbal.servo_controller cimport SpotlightController
-from cymbal.spotlight_gimbal.servo_controller import SpotlightController
-from cymbal.sensors.gps_sensor cimport GPSSensor
-from cymbal.sensors.gps_sensor import GPSSensor
-from cymbal.geo.terrain_elevation cimport TerrainElevationDB
-from cymbal.geo.terrain_elevation import TerrainElevationDB
-from cymbal.geo.address_lookup cimport AddressLookup
-from cymbal.geo.address_lookup import AddressLookup
-from cymbal.inputs.sbus_reader cimport SBUSReader
-from cymbal.inputs.sbus_reader import SBUSReader
-from cymbal.inputs.channel_mapper cimport ChannelMapper
-from cymbal.inputs.channel_mapper import ChannelMapper, MODE_MANUAL, MODE_STABILIZE, MODE_TRACK
-from cymbal.osd.overlay_controller cimport OSDOverlay
-from cymbal.osd.overlay_controller import OSDOverlay
+# cimport declarations give Cython compile-time type information so that
+# direct method calls on ctrl (initialize, run, shutdown, center_all) are
+# dispatched at the C level rather than through the Python object protocol.
+from cymbal.controller.cymbal_controller cimport CymbalController
+from cymbal.gimbals.storm32_adapter cimport Storm32GimbalAdapter
+from cymbal.gimbals.servo_adapter cimport ServoGimbalAdapter
+
+# Runtime Python imports — required for construction and re-export.
+# SimpleBGCGimbalAdapter remains a dynamic (try/except) import because the
+# simplebgc_stub extension is optional and may not be compiled on all targets.
+from cymbal.controller.cymbal_controller import CymbalController, GimbalController  # noqa: F401
+from cymbal.controller.telemetry_provider import InProcessTelemetryProvider as _InProcessPy
 from cymbal.utils.config import SystemConfig
-from libc.math cimport atan2, sqrt, cos, M_PI, isnan
+from cymbal.gimbals.storm32_adapter import Storm32GimbalAdapter as _Storm32Py
+from cymbal.gimbals.servo_adapter import ServoGimbalAdapter as _ServoPy
 
 
-# ---------------------------------------------------------------------------
-# POI tracking math constants
-# ---------------------------------------------------------------------------
-_DEG_TO_RAD     = M_PI / 180.0
-_METERS_PER_DEG = 111111.0   # approximate metres per degree latitude
-
-
-cdef class GimbalController:
+def _build_gimbals_from_config(config: SystemConfig) -> list:
     """
-    Main controller for the Cymbal dual-gimbal system.
+    Instantiate GimbalBase objects from ``config.gimbals``.
 
-    Manages camera and spotlight gimbals, GPS, terrain elevation,
-    reverse geocoding, S-BUS RC input, channel mapping, and OSD.
+    Falls back to the legacy camera_gimbal / spotlight_gimbal fields when
+    the gimbals list is empty (old JSON files).
     """
+    gimbals = []
 
-    cdef object config
-    cdef object logger
+    if config.gimbals:
+        for gd in config.gimbals:
+            if not gd.enabled:
+                continue
+            hw = gd.hardware
+            axes = gd.get_axes_dict()
 
-    # Hardware controllers (existing)
-    cdef Storm32Controller camera_gimbal
-    cdef SpotlightController spotlight_gimbal
+            if gd.backend_type == "storm32":
+                gimbals.append(_Storm32Py(
+                    gimbal_id=gd.id,
+                    port=hw.get("serial_port", "/dev/ttyAMA0"),
+                    baudrate=int(hw.get("baudrate", 115200)),
+                    timeout=float(hw.get("timeout", 1.0)),
+                    roles=list(gd.roles),
+                    axes=axes,
+                ))
 
-    # Phase 2 — geo / GPS
-    cdef GPSSensor gps
-    cdef TerrainElevationDB terrain_db
-    cdef AddressLookup address_lookup
+            elif gd.backend_type == "servo_gpio":
+                gimbals.append(_ServoPy(
+                    gimbal_id=gd.id,
+                    pitch_pin=int(hw.get("pitch_pin", 17)),
+                    yaw_pin=int(hw.get("yaw_pin", 27)),
+                    i2c_address=int(hw.get("i2c_address", 0x68)),
+                    i2c_bus=int(hw.get("i2c_bus", 1)),
+                    use_stabilization=bool(hw.get("use_stabilization", True)),
+                    roles=list(gd.roles),
+                    axes=axes,
+                ))
 
-    # Phase 3 — S-BUS
-    cdef SBUSReader sbus
-
-    # Phase 4 — channel mapping, OSD
-    cdef ChannelMapper channel_mapper
-    cdef OSDOverlay osd
-
-    # Loop state
-    cdef public bint running
-
-    # POI tracking
-    cdef public bint poi_locked
-    cdef public double poi_lat
-    cdef public double poi_lon
-
-    # Cached telemetry (read by OSD / status)
-    cdef public str current_address
-    cdef public int current_mode
-    cdef public double _last_camera_yaw   # degrees from nose; NaN until first command
-
-    def __init__(self, config: SystemConfig):
-        self.config = config
-        self.logger = self._setup_logging()
-
-        self.camera_gimbal   = None
-        self.spotlight_gimbal = None
-        self.gps             = None
-        self.terrain_db      = None
-        self.address_lookup  = None
-        self.sbus            = None
-        self.channel_mapper  = None
-        self.osd             = None
-
-        self.running         = False
-        self.poi_locked      = False
-        self.poi_lat         = 0.0
-        self.poi_lon         = 0.0
-        self.current_address = "No fix"
-        self.current_mode    = MODE_MANUAL
-        self._last_camera_yaw = float('nan')
-
-        signal.signal(signal.SIGINT,  self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-
-    def _setup_logging(self):
-        log_level = getattr(logging, self.config.log_level.upper(), logging.INFO)
-        logging.basicConfig(
-            level=log_level,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.StreamHandler(sys.stdout),
-                logging.FileHandler('/var/log/cymbal.log'),
-            ],
-        )
-        return logging.getLogger(__name__)
-
-    def _signal_handler(self, signum, frame):
-        self.logger.info(f"Received signal {signum}, shutting down...")
-        self.shutdown()
-        sys.exit(0)
-
-    # ------------------------------------------------------------------
-    # Initialization
-    # ------------------------------------------------------------------
-
-    cpdef bint initialize(self):
-        """
-        Initialize all subsystems in dependency order.
-
-        Returns:
-            True if at least one gimbal and all non-optional subsystems
-            initialized successfully.
-        """
-        self.logger.info("Initializing Cymbal gimbal control system...")
-
-        try:
-            self._init_gimbals()
-            self._init_terrain_db()
-            self._init_gps()
-            self._init_address_lookup()
-            self._init_sbus()
-            self._init_channel_mapper()
-            self._init_osd()
-
-            if self.camera_gimbal is None and self.spotlight_gimbal is None:
-                self.logger.error("No gimbals initialized; aborting")
-                return False
-
-            self.logger.info("Cymbal system initialized successfully")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Initialization failed: {e}")
-            return False
-
-    cdef void _init_gimbals(self):
-        cam = self.config.camera_gimbal
-        try:
-            self.camera_gimbal = Storm32Controller(
-                port=cam.serial_port, baudrate=cam.baudrate, timeout=cam.timeout)
-            if not self.camera_gimbal.connect():
-                self.logger.warning("Camera gimbal unavailable")
-                self.camera_gimbal = None
-            else:
-                self.logger.info("Camera gimbal connected")
-        except Exception as e:
-            self.logger.warning(f"Camera gimbal init error: {e}")
-            self.camera_gimbal = None
-
-        spot = self.config.spotlight_gimbal
-        try:
-            self.spotlight_gimbal = SpotlightController(
-                pitch_pin=spot.pitch_pin, yaw_pin=spot.yaw_pin,
-                i2c_address=spot.i2c_address, i2c_bus=spot.i2c_bus,
-                use_stabilization=spot.use_stabilization)
-            if not self.spotlight_gimbal.initialize():
-                self.logger.warning("Spotlight gimbal unavailable")
-                self.spotlight_gimbal = None
-            else:
-                self.logger.info("Spotlight gimbal initialized")
-        except Exception as e:
-            self.logger.warning(f"Spotlight gimbal init error: {e}")
-            self.spotlight_gimbal = None
-
-    cdef void _init_terrain_db(self):
-        cfg = self.config.gps
-        if not cfg.use_terrain_db:
-            self.logger.info("Terrain DB disabled by config")
-            return
-        try:
-            self.terrain_db = TerrainElevationDB()
-            if not self.terrain_db.initialize(cfg.terrain_db_path):
-                self.logger.warning("Terrain DB initialization failed; AGL will be NaN")
-                self.terrain_db = None
-        except Exception as e:
-            self.logger.warning(f"Terrain DB init error: {e}")
-            self.terrain_db = None
-
-    cdef void _init_gps(self):
-        cfg = self.config.gps
-        try:
-            self.gps = GPSSensor(terrain_db=self.terrain_db)
-            if not self.gps.initialize(cfg.port, cfg.baudrate):
-                self.logger.warning("GPS unavailable; position features disabled")
-                self.gps = None
-        except Exception as e:
-            self.logger.warning(f"GPS init error: {e}")
-            self.gps = None
-
-    cdef void _init_address_lookup(self):
-        cfg = self.config.geo
-        if not cfg.enabled:
-            self.logger.info("Address lookup disabled by config")
-            return
-        try:
-            self.address_lookup = AddressLookup()
-            if not self.address_lookup.initialize(cfg.address_db_path):
-                self.logger.warning("Address lookup unavailable")
-                self.address_lookup = None
-        except Exception as e:
-            self.logger.warning(f"Address lookup init error: {e}")
-            self.address_lookup = None
-
-    cdef void _init_sbus(self):
-        cfg = self.config.sbus
-        if not cfg.enabled:
-            self.logger.info("S-BUS disabled by config")
-            return
-        try:
-            self.sbus = SBUSReader()
-            if not self.sbus.connect(cfg.socket_path):
-                self.logger.warning("S-BUS reader unavailable")
-                self.sbus = None
-        except Exception as e:
-            self.logger.warning(f"S-BUS init error: {e}")
-            self.sbus = None
-
-    cdef void _init_channel_mapper(self):
-        try:
-            self.channel_mapper = ChannelMapper()
-            self.channel_mapper.initialize(self.config.channel_map)
-        except Exception as e:
-            self.logger.warning(f"ChannelMapper init error: {e}")
-            self.channel_mapper = None
-
-    cdef void _init_osd(self):
-        try:
-            self.osd = OSDOverlay(self.config.osd)
-            if not self.osd.initialize():
-                self.logger.warning("OSD unavailable (OpenCV missing?)")
-                self.osd = None
-        except Exception as e:
-            self.logger.warning(f"OSD init error: {e}")
-            self.osd = None
-
-    # ------------------------------------------------------------------
-    # Main runtime loop
-    # ------------------------------------------------------------------
-
-    cpdef void run(self):
-        """
-        Run the main 50 Hz control loop.
-
-        Polls S-BUS at 50 Hz, GPS at the configured rate, and updates
-        the OSD at 10 Hz.  Applies manual/stabilize/track mode logic.
-        """
-        cdef double loop_interval   = 1.0 / 50.0          # 20 ms
-        cdef double gps_interval    = 1.0 / max(self.config.gps.update_rate_hz, 1)
-        cdef double osd_interval    = 0.1                  # 10 Hz
-        cdef double address_interval = 1.0                 # 1 Hz
-        cdef double last_gps_t      = 0.0
-        cdef double last_osd_t      = 0.0
-        cdef double last_addr_t     = 0.0
-        cdef double t, elapsed
-
-        self.logger.info("Starting main control loop (50 Hz)")
-        self.running = True
-
-        while self.running:
-            t = time.monotonic()
-
-            # -- S-BUS input (every iteration) --
-            if self.sbus is not None:
-                self.sbus.update()
-                if self.sbus.failsafe_active:
-                    self._apply_failsafe()
-                    self._sleep_to_interval(t, loop_interval)
-                    continue
-
-            # -- GPS --
-            if self.gps is not None and (t - last_gps_t) >= gps_interval:
-                self.gps.update()
-                last_gps_t = t
-
-            # -- POI lock check --
-            if (self.channel_mapper is not None and self.sbus is not None
-                    and self.gps is not None and self.gps.has_fix):
-                if self.channel_mapper.get_poi_lock_triggered(self.sbus):
-                    self._lock_poi(self.gps.latitude, self.gps.longitude)
-
-            # -- Address lookup (1 Hz) --
-            if (self.address_lookup is not None and self.gps is not None
-                    and self.gps.has_fix and (t - last_addr_t) >= address_interval):
-                self.current_address = self.address_lookup.reverse_geocode(
-                    self.gps.latitude, self.gps.longitude)
-                last_addr_t = t
-
-            # -- Gimbal command application --
-            self._apply_control_mode()
-
-            # -- OSD (10 Hz) --
-            if self.osd is not None and (t - last_osd_t) >= osd_interval:
-                self._update_osd()
-                last_osd_t = t
-
-            self._sleep_to_interval(t, loop_interval)
-
-        self.logger.info("Main control loop exited")
-
-    # Keep the old entry point for backward compatibility
-    cpdef void run_stabilization_loop(self, double update_rate=0.1):
-        """
-        Backward-compatible wrapper — runs the full control loop.
-
-        The update_rate parameter is ignored; the loop always runs at 50 Hz.
-        """
-        self.run()
-
-    # ------------------------------------------------------------------
-    # Control mode dispatch
-    # ------------------------------------------------------------------
-
-    cdef void _apply_control_mode(self):
-        """Dispatch gimbal commands based on the current operating mode."""
-        cdef int mode = MODE_MANUAL
-        cdef dict cmds
-        cdef double poi_pitch, poi_yaw
-
-        if self.channel_mapper is not None and self.sbus is not None:
-            mode = self.channel_mapper.get_mode_index(self.sbus)
-        self.current_mode = mode
-
-        if mode == MODE_MANUAL:
-            if self.channel_mapper is not None and self.sbus is not None:
-                cmds = self.channel_mapper.get_gimbal_commands(self.sbus)
-                self.set_camera_position(
-                    cmds['camera_pitch'], 0.0, cmds['camera_yaw'])
-                self.set_spotlight_position(
-                    cmds['spotlight_pitch'], cmds['spotlight_yaw'])
-                self._last_camera_yaw = cmds['camera_yaw']
-
-        elif mode == MODE_TRACK:
-            if (self.poi_locked and self.gps is not None and self.gps.has_fix
-                    and not isnan(self.gps.altitude_agl)):
-                poi_pitch, poi_yaw = self._compute_poi_angles(
-                    self.gps.latitude, self.gps.longitude, self.gps.altitude_agl,
-                    self.poi_lat, self.poi_lon)
-                self.sync_gimbals(poi_pitch, poi_yaw)
-                # In TRACK mode the camera yaw is the absolute bearing offset
-                # from the aircraft nose = poi_yaw - gps.track_degrees
-                if not isnan(self.gps.track_degrees):
-                    self._last_camera_yaw = poi_yaw - self.gps.track_degrees
-                else:
-                    self._last_camera_yaw = poi_yaw
-
-        elif mode == MODE_STABILIZE:
-            if self.spotlight_gimbal is not None:
+            elif gd.backend_type == "simplebgc":
                 try:
-                    self.spotlight_gimbal.stabilize()
-                except Exception:
-                    pass
-            # In stabilize mode, camera yaw stays at last known value
+                    from cymbal.gimbals.simplebgc_stub import SimpleBGCGimbalAdapter
+                    gimbals.append(SimpleBGCGimbalAdapter(
+                        gimbal_id=gd.id,
+                        port=hw.get("port", "/dev/ttyUSB0"),
+                        baudrate=int(hw.get("baudrate", 115200)),
+                        roles=list(gd.roles),
+                        axes=axes,
+                    ))
+                except Exception as e:
+                    logging.getLogger(__name__).warning(
+                        f"SimpleBGC gimbal '{gd.id}' not available: {e}"
+                    )
 
-    cdef void _apply_failsafe(self):
-        """Center all gimbals immediately on S-BUS failsafe."""
-        self.logger.warning("S-BUS failsafe active — centering gimbals")
-        self.center_all()
-        self._last_camera_yaw = 0.0
+            else:
+                logging.getLogger(__name__).warning(
+                    f"Unknown backend_type '{gd.backend_type}' for gimbal '{gd.id}'; skipping"
+                )
+    else:
+        # Legacy fallback: use old camera_gimbal / spotlight_gimbal config sections
+        cam  = config.camera_gimbal
+        spot = config.spotlight_gimbal
+        gimbals = [
+            _Storm32Py(
+                gimbal_id="camera_1",
+                port=cam.serial_port,
+                baudrate=cam.baudrate,
+                timeout=cam.timeout,
+            ),
+            _ServoPy(
+                gimbal_id="spotlight_1",
+                pitch_pin=spot.pitch_pin,
+                yaw_pin=spot.yaw_pin,
+                i2c_address=spot.i2c_address,
+                i2c_bus=spot.i2c_bus,
+                use_stabilization=spot.use_stabilization,
+            ),
+        ]
 
-    # ------------------------------------------------------------------
-    # POI tracking math
-    # ------------------------------------------------------------------
-
-    cdef tuple _compute_poi_angles(self, double ac_lat, double ac_lon,
-                                   double ac_alt_agl,
-                                   double poi_lat, double poi_lon):
-        """
-        Compute the gimbal pitch and yaw angles to point at a ground POI.
-
-        Args:
-            ac_lat, ac_lon:  Aircraft position (decimal degrees).
-            ac_alt_agl:      Aircraft altitude above ground (metres).
-            poi_lat, poi_lon: POI coordinates (decimal degrees).
-
-        Returns:
-            (pitch_deg, yaw_deg) — pitch is ≤ 0 (looking down).
-        """
-        cdef double d_north, d_east, d_horiz, pitch_deg, yaw_deg
-        cdef double cos_lat = cos(ac_lat * _DEG_TO_RAD)
-
-        d_north = (poi_lat - ac_lat) * _METERS_PER_DEG
-        d_east  = (poi_lon - ac_lon) * _METERS_PER_DEG * cos_lat
-        d_horiz = sqrt(d_north * d_north + d_east * d_east)
-
-        # Yaw: bearing from aircraft to POI (degrees from true north)
-        yaw_deg = atan2(d_east, d_north) * 180.0 / M_PI
-
-        # Pitch: angle below horizontal to ground POI (negative = down)
-        if d_horiz < 0.1:
-            pitch_deg = -90.0   # directly below
-        else:
-            pitch_deg = -atan2(ac_alt_agl, d_horiz) * 180.0 / M_PI
-
-        return (pitch_deg, yaw_deg)
-
-    cpdef void lock_poi(self, double lat, double lon):
-        """Lock the given coordinates as the current POI target."""
-        self._lock_poi(lat, lon)
-
-    cdef void _lock_poi(self, double lat, double lon):
-        self.poi_lat    = lat
-        self.poi_lon    = lon
-        self.poi_locked = True
-        self.logger.info(f"POI locked at ({lat:.5f}, {lon:.5f})")
-
-    cpdef void unlock_poi(self):
-        """Release the current POI lock."""
-        self.poi_locked = False
-        self.logger.info("POI unlocked")
-
-    # ------------------------------------------------------------------
-    # OSD update
-    # ------------------------------------------------------------------
-
-    cdef void _update_osd(self):
-        cdef double lat, lon, alt_agl, gs, track_deg, cam_yaw
-        cdef int fix_q, sats, i
-
-        lat      = 0.0
-        lon      = 0.0
-        alt_agl  = float('nan')
-        gs       = float('nan')
-        track_deg = float('nan')
-        cam_yaw  = self._last_camera_yaw
-        fix_q    = 0
-        sats     = 0
-
-        if self.gps is not None:
-            lat       = self.gps.latitude
-            lon       = self.gps.longitude
-            alt_agl   = self.gps.altitude_agl
-            gs        = self.gps.groundspeed_ms
-            fix_q     = self.gps.fix_quality
-            sats      = self.gps.satellites
-            track_deg = self.gps.track_degrees
-
-        # Convert C int[18] array to Python list for OSD display
-        sbus_ch = []
-        if self.sbus is not None:
-            for i in range(18):
-                sbus_ch.append(self.sbus.channels[i])
-
-        self.osd.update_telemetry(
-            lat, lon, alt_agl, gs,
-            self.current_address, fix_q, sats, sbus_ch,
-            track_deg, cam_yaw,
-        )
-
-    # ------------------------------------------------------------------
-    # Status and telemetry accessors
-    # ------------------------------------------------------------------
-
-    cpdef tuple get_position(self):
-        """
-        Return current GPS position.
-
-        Returns:
-            (latitude, longitude, altitude_msl, altitude_agl) as floats,
-            or all NaN if GPS is unavailable or has no fix.
-        """
-        cdef double nan
-        nan = float('nan')
-        if self.gps is None or not self.gps.has_fix:
-            return (nan, nan, nan, nan)
-        return (self.gps.latitude, self.gps.longitude,
-                self.gps.altitude_msl, self.gps.altitude_agl)
-
-    cpdef double get_groundspeed(self):
-        """
-        Return current ground speed in m/s, or NaN if unavailable.
-        """
-        if self.gps is None:
-            return float('nan')
-        return self.gps.groundspeed_ms
-
-    cpdef dict get_status(self):
-        """Return a status snapshot of all subsystems."""
-        cdef dict status = {
-            'camera_gimbal':   None,
-            'spotlight_gimbal': None,
-            'gps':             None,
-            'sbus':            None,
-            'mode':            self.current_mode,
-            'poi_locked':      self.poi_locked,
-            'address':         self.current_address,
-        }
-
-        if self.camera_gimbal:
-            status['camera_gimbal'] = self.camera_gimbal.get_status()
-
-        if self.spotlight_gimbal:
-            status['spotlight_gimbal'] = {
-                'orientation': self.spotlight_gimbal.get_orientation(),
-                'target_pitch': self.spotlight_gimbal.target_pitch,
-                'target_yaw':   self.spotlight_gimbal.target_yaw,
-            }
-
-        if self.gps:
-            status['gps'] = {
-                'has_fix':      self.gps.has_fix,
-                'fix_quality':  self.gps.fix_quality,
-                'satellites':   self.gps.satellites,
-                'lat':          self.gps.latitude,
-                'lon':          self.gps.longitude,
-                'alt_msl':      self.gps.altitude_msl,
-                'alt_agl':      self.gps.altitude_agl,
-                'groundspeed':  self.gps.groundspeed_ms,
-            }
-
-        if self.sbus:
-            status['sbus'] = {
-                'connected':   self.sbus.connected,
-                'failsafe':    self.sbus.failsafe_active,
-                'frame_lost':  self.sbus.frame_lost,
-            }
-
-        return status
-
-    # ------------------------------------------------------------------
-    # Existing gimbal control API (preserved)
-    # ------------------------------------------------------------------
-
-    cpdef void center_all(self):
-        """Center both gimbals."""
-        if self.camera_gimbal:
-            self.camera_gimbal.center()
-        if self.spotlight_gimbal:
-            self.spotlight_gimbal.center()
-
-    cpdef bint set_camera_position(self, double pitch, double roll, double yaw):
-        """Set camera gimbal angles (degrees)."""
-        if not self.camera_gimbal:
-            return False
-        return self.camera_gimbal.set_angle(pitch, roll, yaw)
-
-    cpdef bint set_spotlight_position(self, double pitch, double yaw):
-        """Set spotlight gimbal position (degrees)."""
-        if not self.spotlight_gimbal:
-            return False
-        return self.spotlight_gimbal.set_position(pitch, yaw)
-
-    cpdef void sync_gimbals(self, double pitch, double yaw):
-        """Point both gimbals to the same pitch/yaw."""
-        if self.camera_gimbal:
-            self.camera_gimbal.set_angle(pitch, 0, yaw)
-        if self.spotlight_gimbal:
-            self.spotlight_gimbal.set_position(pitch, yaw)
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    cdef void _sleep_to_interval(self, double t_start, double interval):
-        """Sleep for whatever remains of the loop interval."""
-        cdef double elapsed = time.monotonic() - t_start
-        cdef double remaining = interval - elapsed
-        if remaining > 0.0:
-            time.sleep(remaining)
-
-    cpdef void shutdown(self):
-        """Gracefully shut down all subsystems."""
-        self.logger.info("Shutting down Cymbal system...")
-        self.running = False
-
-        if self.camera_gimbal:
-            self.camera_gimbal.disconnect()
-        if self.spotlight_gimbal:
-            self.spotlight_gimbal.close()
-        if self.gps:
-            self.gps.close()
-        if self.address_lookup:
-            self.address_lookup.close()
-        if self.terrain_db:
-            self.terrain_db.close()
-        if self.sbus:
-            self.sbus.close()
-        if self.osd:
-            self.osd.close()
-
-        self.logger.info("Cymbal system shutdown complete")
+    return gimbals
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
+def _build_telemetry_provider(config, logger):
+    """
+    Construct the correct TelemetryProvider from config.
+
+    telemetry.mode == "sidecar":
+        Try to open a SocketTelemetryProvider.  If the socket cannot be bound
+        (e.g. the sidecar is not yet running), fall back to InProcess and log
+        a warning so the operator knows the control loop will block on GPS.
+
+    telemetry.mode == "in_process" (default):
+        Always use InProcessTelemetryProvider.
+
+    The provider is NOT initialized here; CymbalController.initialize() calls
+    provider.initialize() as part of its normal startup sequence.
+    """
+    mode = getattr(config.telemetry, 'mode', 'in_process')
+    if mode == 'sidecar':
+        try:
+            from cymbal.controller.socket_telemetry_provider import (
+                SocketTelemetryProvider as _SockPy,
+            )
+            provider = _SockPy(
+                socket_path      = config.telemetry.socket_path,
+                frame_timeout_ms = float(config.telemetry.frame_timeout_ms),
+            )
+            logger.info(
+                f"TelemetryProvider: sidecar mode — socket={config.telemetry.socket_path}"
+            )
+            return provider
+        except Exception as e:
+            logger.warning(
+                f"TelemetryProvider: sidecar requested but SocketTelemetryProvider "
+                f"unavailable ({e}); falling back to in-process (GPS blocks control loop)"
+            )
+
+    # Default / fallback: in-process provider
+    logger.info("TelemetryProvider: in-process mode (GPS serial in control loop)")
+    return _InProcessPy(
+        gps_config          = config.gps,
+        geo_config          = config.geo,
+        gps_update_rate_hz  = float(config.gps.update_rate_hz),
+    )
+
 
 def main():
-    """Main entry point for cymbal.main module."""
-    config = SystemConfig.load('/etc/cymbal/config.json')
-    controller = GimbalController(config)
+    """
+    Main entry point for the Cymbal control application.
 
-    if not controller.initialize():
-        print("Failed to initialize Cymbal system", file=sys.stderr)
-        return 1
+    Process-level concerns handled here:
+      - logging.basicConfig() with optional file handler
+      - Signal handler registration (Ctrl+C / SIGTERM)
+      - Config loading → provider selection → gimbal construction → controller startup
+    """
+    cdef CymbalController ctrl
 
-    controller.center_all()
-    print("Cymbal system ready — press Ctrl+C to exit")
+    config = SystemConfig.load("/etc/cymbal/config.json")
+
+    # --- Logging ---
+    log_level = getattr(logging, config.log_level.upper(), logging.INFO)
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler("/var/log/cymbal.log"),
+        ],
+    )
+    logger = logging.getLogger(__name__)
+
+    # --- Telemetry provider (selected from config) ---
+    telemetry_provider = _build_telemetry_provider(config, logger)
+
+    # --- Gimbals ---
+    gimbals = _build_gimbals_from_config(config)
+
+    # --- Controller (typed so lifecycle calls dispatch at the C level) ---
+    ctrl = CymbalController(
+        gimbals,
+        config,
+        logger=logger,
+        telemetry_provider=telemetry_provider,
+    )
+
+    # --- Signal handlers (process-level only) ---
+    def _on_signal(signum, frame):
+        logger.info(f"Received signal {signum}, shutting down…")
+        ctrl.shutdown()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT,  _on_signal)
+    signal.signal(signal.SIGTERM, _on_signal)
+
+    if not ctrl.initialize():
+        logger.error("Failed to initialize Cymbal system")
+        sys.exit(1)
+
+    ctrl.center_all()
+    logger.info("Cymbal system ready — press Ctrl+C to exit")
 
     try:
-        controller.run()
+        ctrl.run()
     except KeyboardInterrupt:
         pass
     finally:
-        controller.shutdown()
+        ctrl.shutdown()
 
     return 0
 

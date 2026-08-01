@@ -66,6 +66,36 @@ extensions = [
         "cymbal.inputs.channel_mapper",
         ["cymbal/inputs/channel_mapper.pyx"],
     ),
+    # --- Gimbal abstraction layer ---
+    Extension(
+        "cymbal.gimbals.base",
+        ["cymbal/gimbals/base.pyx"],
+    ),
+    Extension(
+        "cymbal.gimbals.storm32_adapter",
+        ["cymbal/gimbals/storm32_adapter.pyx"],
+    ),
+    Extension(
+        "cymbal.gimbals.servo_adapter",
+        ["cymbal/gimbals/servo_adapter.pyx"],
+    ),
+    Extension(
+        "cymbal.gimbals.simplebgc_stub",
+        ["cymbal/gimbals/simplebgc_stub.pyx"],
+    ),
+    # --- Controller ---
+    Extension(
+        "cymbal.controller.telemetry_provider",
+        ["cymbal/controller/telemetry_provider.pyx"],
+    ),
+    Extension(
+        "cymbal.controller.socket_telemetry_provider",
+        ["cymbal/controller/socket_telemetry_provider.pyx"],
+    ),
+    Extension(
+        "cymbal.controller.cymbal_controller",
+        ["cymbal/controller/cymbal_controller.pyx"],
+    ),
 ]
 
 setup(
@@ -80,11 +110,11 @@ setup(
     ext_modules=cythonize(
         extensions,
         compiler_directives={
-            'language_level': "3",
-            'embedsignature': True,
-            'boundscheck': False,
-            'wraparound': False,
-            'cdivision': True,
+            "language_level": "3",
+            "embedsignature": True,
+            "boundscheck": False,
+            "wraparound": False,
+            "cdivision": True,
         }
     ),
     classifiers=[
@@ -102,49 +132,7 @@ setup(
     ],
     python_requires=">=3.7",
     install_requires=requirements,
-    setup_requires=['Cython>=0.29.0'],
-    entry_points={
-        "console_scripts": [
-            "cymbal=cymbal.main:main",
-        ],
-    },
-)
-
-setup(
-    name="cymbal",
-    version="0.1.0",
-    author="gtraines",
-    description="Control software for dual gimbals on fixed-wing drones (Cython optimized)",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    url="https://github.com/gtraines/cymbal",
-    packages=find_packages(),
-    ext_modules=cythonize(
-        extensions,
-        compiler_directives={
-            'language_level': "3",
-            'embedsignature': True,
-            'boundscheck': False,
-            'wraparound': False,
-            'cdivision': True,
-        }
-    ),
-    classifiers=[
-        "Development Status :: 3 - Alpha",
-        "Intended Audience :: Developers",
-        "Topic :: System :: Hardware :: Hardware Drivers",
-        "License :: OSI Approved :: MIT License",
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.7",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Cython",
-        "Operating System :: POSIX :: Linux",
-    ],
-    python_requires=">=3.7",
-    install_requires=requirements,
-    setup_requires=['Cython>=0.29.0'],
+    setup_requires=["Cython>=0.29.0"],
     entry_points={
         "console_scripts": [
             "cymbal=cymbal.main:main",
