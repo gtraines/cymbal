@@ -269,9 +269,85 @@ class GimbalCommandSchema:
 
 
 # ---------------------------------------------------------------------------
+# ControllerState  (controller → video sidecar: POI / target data)
+# ---------------------------------------------------------------------------
+#
+# Field layout (big-endian, 45 bytes):
+#   magic          4s   — b'CTRL'
+#   poi_locked     B    — 1 if a POI is currently locked, 0 otherwise
+#   poi_lat        d    — target latitude, decimal degrees (NaN if not locked)
+#   poi_lon        d    — target longitude, decimal degrees (NaN if not locked)
+#   poi_alt_msl    d    — target terrain elevation, metres MSL (NaN if unknown)
+#   slant_range_m  d    — 3D aircraft→target distance, metres (NaN if unknown)
+#   timestamp      d    — monotonic seconds at time of publish
+
+_CTRL_STRUCT = struct.Struct('!4sBddddd')
+
+_CTRL_MAGIC = b'CTRL'
+
+
+class ControllerStateSchema:
+    """
+    Packs and unpacks ControllerState IPC datagrams.
+
+    Published by CymbalController to /run/cymbal/controller.sock.reader
+    whenever the POI state changes or on each control loop iteration when
+    a POI is locked.
+
+    Total size: 45 bytes.
+    """
+
+    MAGIC = _CTRL_MAGIC
+    SIZE  = _CTRL_STRUCT.size
+
+    @staticmethod
+    def pack(
+        poi_locked:    bool,
+        poi_lat:       float,
+        poi_lon:       float,
+        poi_alt_msl:   float,
+        slant_range_m: float,
+        timestamp:     float,
+    ) -> bytes:
+        return _CTRL_STRUCT.pack(
+            _CTRL_MAGIC,
+            1 if poi_locked else 0,
+            poi_lat,
+            poi_lon,
+            poi_alt_msl,
+            slant_range_m,
+            timestamp,
+        )
+
+    @staticmethod
+    def unpack(data: bytes) -> dict:
+        if len(data) < _CTRL_STRUCT.size:
+            return {'valid': False}
+        (
+            magic,
+            poi_locked_byte,
+            poi_lat,
+            poi_lon,
+            poi_alt_msl,
+            slant_range_m,
+            timestamp,
+        ) = _CTRL_STRUCT.unpack_from(data)
+        return {
+            'valid':         magic == _CTRL_MAGIC,
+            'poi_locked':    bool(poi_locked_byte),
+            'poi_lat':       poi_lat,
+            'poi_lon':       poi_lon,
+            'poi_alt_msl':   poi_alt_msl,
+            'slant_range_m': slant_range_m,
+            'timestamp':     timestamp,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Socket path constants (defaults — all overridable via config.json)
 # ---------------------------------------------------------------------------
 
-SOCKET_SBUS_PATH      = '/run/cymbal/sbus.sock'       # S-BUS decoder (existing)
-SOCKET_TELEMETRY_PATH = '/run/cymbal/telemetry.sock'  # telemetry sidecar (Phase 3)
-SOCKET_HEALTH_PATH    = '/run/cymbal/health.sock'     # health status (Phase 5)
+SOCKET_SBUS_PATH       = '/run/cymbal/sbus.sock'        # S-BUS decoder (existing)
+SOCKET_TELEMETRY_PATH  = '/run/cymbal/telemetry.sock'   # telemetry sidecar (Phase 3)
+SOCKET_HEALTH_PATH     = '/run/cymbal/health.sock'      # health status (Phase 5)
+SOCKET_CONTROLLER_PATH = '/run/cymbal/controller.sock'  # controller state → video
