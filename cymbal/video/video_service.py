@@ -102,6 +102,7 @@ def _load_config() -> dict:
             'show_sbus_channels': False,
             'show_compass':     True,
             'compass_radius':   45,
+            'local_timezone':   'America/Phoenix',
         },
         'telemetry': {
             'mode':             'sidecar',

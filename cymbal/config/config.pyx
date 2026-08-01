@@ -64,6 +64,7 @@ class OSDConfig:
     heading_tape_height_pct: float = 0.07
     heading_tape_width_pct: float = 0.25
     heading_tape_fov_deg: float = 30.0
+    local_timezone: str = "America/Phoenix"
 
 
 @dataclass

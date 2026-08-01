@@ -50,6 +50,11 @@ class OSDOverlay:
         self._video_sink = None
         self._time_fn    = time_fn if time_fn is not None else datetime.datetime.utcnow
 
+        # Local timezone for second timestamp line
+        self.local_timezone = "America/Phoenix"
+        self._local_tz      = None
+        self._resolve_timezone()
+
         # Aircraft telemetry
         self.lat            = _NAN
         self.lon            = _NAN
@@ -93,6 +98,20 @@ class OSDOverlay:
             self.heading_tape_width_pct = config.heading_tape_width_pct
         if hasattr(config, 'heading_tape_fov_deg'):
             self.heading_tape_fov_deg = config.heading_tape_fov_deg
+        if hasattr(config, 'local_timezone'):
+            self.local_timezone = config.local_timezone
+        self._resolve_timezone()
+
+    def _resolve_timezone(self):
+        tz = self.local_timezone
+        if not tz or tz.upper() == 'UTC':
+            self._local_tz = None
+            return
+        try:
+            from zoneinfo import ZoneInfo
+            self._local_tz = ZoneInfo(tz)
+        except Exception:
+            self._local_tz = None
 
     def initialize(self, video_sink=None):
         """Attach optional video sink. Returns True always in the test stub."""
@@ -168,9 +187,21 @@ class OSDOverlay:
         # Panel header
         lines.append("\u2500\u2500 AIRCRAFT \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
 
-        # Timestamp via injected callable
-        ts = self._time_fn().strftime("%H:%M:%S UTC")
-        lines.append(ts)
+        # UTC date-timestamp
+        utc_dt = self._time_fn()
+        ts_utc = utc_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+        lines.append(ts_utc)
+
+        # Local date-timestamp (when timezone configured)
+        if self._local_tz is not None:
+            try:
+                import datetime as _dt_mod
+                utc_aware = utc_dt.replace(tzinfo=_dt_mod.timezone.utc)
+                local_dt  = utc_aware.astimezone(self._local_tz)
+                tz_abbr   = local_dt.strftime("%Z")
+                lines.append(local_dt.strftime(f"%Y-%m-%d %H:%M:%S {tz_abbr}"))
+            except Exception:
+                pass
 
         # Address
         lines.append(self.address or "Unknown address")

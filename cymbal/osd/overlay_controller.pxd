@@ -23,6 +23,10 @@ cdef class OSDOverlay:
     # Timestamp injection (callable → datetime)
     cdef object _time_fn
 
+    # Timezone for local timestamp display
+    cdef public str local_timezone   # IANA timezone name, e.g. "America/Phoenix"
+    cdef object _local_tz            # zoneinfo.ZoneInfo instance, or None
+
     # Cached aircraft telemetry values
     cdef public double lat
     cdef public double lon

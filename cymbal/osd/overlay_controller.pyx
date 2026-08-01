@@ -100,6 +100,11 @@ cdef class OSDOverlay:
         self._video_sink = None
         self._time_fn = time_fn if time_fn is not None else datetime.datetime.utcnow
 
+        # Local timezone for second timestamp line
+        self.local_timezone = "America/Phoenix"
+        self._local_tz      = None
+        self._resolve_timezone()
+
         # Aircraft telemetry
         self.lat = _NAN
         self.lon = _NAN
@@ -138,6 +143,24 @@ cdef class OSDOverlay:
         self.heading_tape_height_pct = config.heading_tape_height_pct
         self.heading_tape_width_pct = config.heading_tape_width_pct
         self.heading_tape_fov_deg = config.heading_tape_fov_deg
+        if hasattr(config, 'local_timezone'):
+            self.local_timezone = config.local_timezone
+        self._resolve_timezone()
+
+    def _resolve_timezone(self):
+        """Resolve self.local_timezone to a ZoneInfo instance, or None on failure."""
+        tz = self.local_timezone
+        if not tz or tz.upper() == "UTC":
+            self._local_tz = None
+            return
+        try:
+            from zoneinfo import ZoneInfo
+            self._local_tz = ZoneInfo(tz)
+        except Exception as e:
+            logger.warning(
+                f"OSDOverlay: unknown timezone '{tz}' ({e}); showing UTC only"
+            )
+            self._local_tz = None
 
     cpdef bint initialize(self, object video_sink=None):
         """
@@ -289,9 +312,21 @@ cdef class OSDOverlay:
         # Panel header
         lines.append("\u2500\u2500 AIRCRAFT \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
 
-        # Timestamp — use injected callable for testability
-        ts = self._time_fn().strftime("%H:%M:%S UTC")
-        lines.append(ts)
+        # UTC date-timestamp
+        utc_dt = self._time_fn()
+        ts_utc = utc_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+        lines.append(ts_utc)
+
+        # Local date-timestamp (when timezone is configured)
+        if self._local_tz is not None:
+            try:
+                utc_aware  = utc_dt.replace(tzinfo=datetime.timezone.utc)
+                local_dt   = utc_aware.astimezone(self._local_tz)
+                tz_abbr    = local_dt.strftime("%Z")
+                ts_local   = local_dt.strftime(f"%Y-%m-%d %H:%M:%S {tz_abbr}")
+                lines.append(ts_local)
+            except Exception:
+                pass  # silently omit local line on conversion error
 
         # Address
         lines.append(self.address or "Unknown address")

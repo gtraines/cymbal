@@ -136,7 +136,8 @@ class TestOSDRenderPipeline(unittest.TestCase):
         frame = {}
         osd.render_frame(frame)
         lines = frame.get('lines', [])
-        self.assertEqual(lines[1], "09:15:30 UTC")
+        # lines[1] is UTC date-timestamp; contains injected time
+        self.assertIn("09:15:30 UTC", lines[1])
 
     # ------------------------------------------------------------------
     # Target panel visibility
