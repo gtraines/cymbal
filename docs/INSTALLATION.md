@@ -155,12 +155,40 @@ See [docs/GPS.md](GPS.md) for instructions.
 
 ### 9. Install Systemd Services
 
+Cymbal runs as four coordinated systemd services.  See [docs/SERVICES.md](SERVICES.md)
+for the full service graph, IPC paths, and resource isolation details.
+
+#### Sidecar mode (recommended — GPS and OSD run in separate processes)
+
+```bash
+sudo cp sbus-decoder.service    /etc/systemd/system/
+sudo cp cymbal-telemetry.service /etc/systemd/system/
+sudo cp cymbal-video.service     /etc/systemd/system/
+sudo cp cymbal.service           /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable sbus-decoder cymbal-telemetry cymbal-video cymbal
+```
+
+Also ensure `config.json` has:
+
+```json
+"telemetry": {
+  "mode": "sidecar",
+  "socket_path": "/run/cymbal/telemetry.sock",
+  "frame_timeout_ms": 500
+}
+```
+
+#### In-process mode (simpler — GPS runs inside the control loop, may block at 5 Hz)
+
 ```bash
 sudo cp sbus-decoder.service /etc/systemd/system/
 sudo cp cymbal.service       /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable sbus-decoder cymbal
 ```
+
+Set `"telemetry": {"mode": "in_process"}` in `config.json` (this is the default).
 
 Test basic imports:
 

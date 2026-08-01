@@ -13,11 +13,22 @@ Environment="PYTHONUNBUFFERED=1"
 ExecStart=/usr/bin/python3 -m cymbal.inputs.sbus_service
 Restart=on-failure
 RestartSec=2s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
 # Create /run/cymbal/ at service start so the socket path exists
 RuntimeDirectory=cymbal
 RuntimeDirectoryMode=0755
 StandardOutput=journal
 StandardError=journal
+
+# Resource policy:
+#   Nice=-5: slightly elevated priority — SBUS frames arrive every 14 ms
+#   and must not be missed during a CPU spike.
+#   CPUAffinity=0: dedicate to core 0 alongside pigpiod for minimal IPC latency.
+#   MemoryMax=64M: sbus_service is very lightweight; cap to catch leaks early.
+Nice=-5
+CPUAffinity=0
+MemoryMax=64M
 
 # Security hardening
 NoNewPrivileges=true

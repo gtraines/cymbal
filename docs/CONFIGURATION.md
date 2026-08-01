@@ -114,6 +114,52 @@ See [OSD.md](OSD.md) for detailed display configuration.
 
 See [SBUS.md](SBUS.md) for wiring and service setup.
 
+### Telemetry Section
+
+Controls whether GPS, terrain, and address lookup run inside the main control
+process (`"in_process"`) or in a separate sidecar process (`"sidecar"`).
+
+```json
+"telemetry": {
+  "mode": "sidecar",
+  "socket_path": "/run/cymbal/telemetry.sock",
+  "frame_timeout_ms": 500
+}
+```
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `mode` | string | `"in_process"` | `"in_process"` — GPS runs in the control loop (may block); `"sidecar"` — telemetry runs in `cymbal-telemetry.service` |
+| `socket_path` | string | `/run/cymbal/telemetry.sock` | Unix socket where the sidecar publishes telemetry |
+| `frame_timeout_ms` | int | `500` | Milliseconds after which stale telemetry is flagged as "No fix" |
+
+See [SERVICES.md](SERVICES.md) for the service setup required when using `"sidecar"` mode.
+
+### Video Section
+
+Controls the `cymbal-video` sidecar process: camera source, output mode, and frame dimensions.
+
+```json
+"video": {
+  "mode": "headless",
+  "camera_source": 0,
+  "width": 640,
+  "height": 480,
+  "fps": 30.0,
+  "window_title": "Cymbal OSD",
+  "output_path": ""
+}
+```
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `mode` | string | `"headless"` | `"headless"` — render OSD but don't display; `"display"` — cv2.imshow window (requires desktop); `"composite"` — write to `output_path` via VideoWriter |
+| `camera_source` | int | `0` | Camera device index (`/dev/video0` = 0). Use `-1` to disable capture and render OSD on a blank frame |
+| `width` / `height` | int | `640` / `480` | Frame dimensions in pixels |
+| `fps` | float | `30.0` | Target frame rate for the video render loop and composite output |
+| `window_title` | string | `"Cymbal OSD"` | Window title for `display` mode |
+| `output_path` | string | `""` | File path for `composite` mode (`*.mp4`) |
+
 ### Channel Map Section
 
 ```json
@@ -188,6 +234,18 @@ Valid values: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
     "failsafe_action": "center",
     "frame_timeout_ms": 100,
     "enabled": true
+  },
+  "telemetry": {
+    "mode": "sidecar",
+    "socket_path": "/run/cymbal/telemetry.sock",
+    "frame_timeout_ms": 500
+  },
+  "video": {
+    "mode": "headless",
+    "camera_source": 0,
+    "width": 640,
+    "height": 480,
+    "fps": 30.0
   },
   "channel_map": {
     "camera_pitch": 6,

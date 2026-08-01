@@ -13,6 +13,12 @@ cdef class OSDOverlay:
     cdef public bint show_compass
     cdef public int compass_radius
 
+    # Video sink (optional)
+    cdef object _video_sink
+
+    # Timestamp injection (callable → datetime)
+    cdef object _time_fn
+
     # Cached telemetry values
     cdef public double lat
     cdef public double lon
@@ -25,7 +31,7 @@ cdef class OSDOverlay:
     cdef public double track_degrees   # GPS ground track, degrees from N clockwise
     cdef public double camera_yaw_deg  # camera yaw relative to aircraft nose, degrees
 
-    cpdef bint initialize(self)
+    cpdef bint initialize(self, object video_sink=*)
     cpdef void update_telemetry(self, double lat, double lon, double alt_agl,
                                 double groundspeed, str address,
                                 int fix_quality, int satellites,

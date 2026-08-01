@@ -21,6 +21,10 @@ POI lock (ch_poi_lock, channel 10 by default):
 
 Channel normalization uses the Futaba 172/992/1811 convention (matching
 SBUSDecoder.get_channel_normalized).
+
+New API (modular):
+  initialize_from_gimbals(gimbals_list, mode_channel, poi_lock_channel)
+  get_commands(sbus) -> {gimbal_id: {axis_name: degrees}}
 """
 
 from libc.math cimport fabs
@@ -48,10 +52,16 @@ cdef class ChannelMapper:
     """
     Maps S-BUS channels to gimbal commands and controller modes.
 
-    initialize() must be called before any other method.
+    Two initialisation paths:
+      1. Legacy: initialize(ChannelMapConfig) — maintains the old 4-axis
+         camera+spotlight mapping and get_gimbal_commands() output shape.
+      2. Modular: initialize_from_gimbals(gimbals_list, mode_ch, poi_ch) —
+         reads sbus_channel from each AxisConfig; use get_commands() to
+         receive a per-gimbal, per-axis command dict.
     """
 
     def __init__(self):
+        # --- Legacy defaults ---
         self.ch_camera_pitch   = 6
         self.ch_camera_yaw     = 7
         self.ch_spotlight_pitch = 8
@@ -69,6 +79,14 @@ cdef class ChannelMapper:
         self._spot_yaw_max   =  180.0
 
         self._prev_poi_raw = 0
+
+        # --- Modular axis map ---
+        # (gimbal_id, axis_name) -> (sbus_channel, min_deg, max_deg)
+        self._axis_map = {}
+
+    # ------------------------------------------------------------------
+    # Initialisation — legacy path
+    # ------------------------------------------------------------------
 
     cpdef bint initialize(self, object config):
         """
@@ -104,6 +122,61 @@ cdef class ChannelMapper:
             f"mode=ch{self.ch_mode_select}, poi_lock=ch{self.ch_poi_lock}"
         )
         return True
+
+    # ------------------------------------------------------------------
+    # Initialisation — modular path
+    # ------------------------------------------------------------------
+
+    cpdef bint initialize_from_gimbals(
+        self,
+        list gimbal_defs,
+        int mode_channel = 5,
+        int poi_lock_channel = 10,
+    ):
+        """
+        Build the axis map from a list of GimbalDef objects.
+
+        Any axis whose AxisConfig.sbus_channel is None is skipped (not
+        RC-controlled in this configuration).
+
+        Args:
+            gimbal_defs:       List of GimbalDef dataclass instances.
+            mode_channel:      S-BUS channel for mode selection (default 5).
+            poi_lock_channel:  S-BUS channel for POI lock (default 10).
+
+        Returns:
+            True always.
+        """
+        self.ch_mode_select = mode_channel
+        self.ch_poi_lock    = poi_lock_channel
+        self._axis_map = {}
+
+        for gd in gimbal_defs:
+            if not gd.enabled:
+                continue
+            for ax in gd.axes:
+                if ax.sbus_channel is None:
+                    continue
+                key = (gd.id, ax.name)
+                self._axis_map[key] = (
+                    int(ax.sbus_channel),
+                    float(ax.min_deg),
+                    float(ax.max_deg),
+                )
+                logger.debug(
+                    f"ChannelMapper: {gd.id}.{ax.name} -> ch{ax.sbus_channel} "
+                    f"[{ax.min_deg}, {ax.max_deg}]"
+                )
+
+        logger.info(
+            f"ChannelMapper (modular): {len(self._axis_map)} axis mappings, "
+            f"mode=ch{self.ch_mode_select}, poi_lock=ch{self.ch_poi_lock}"
+        )
+        return True
+
+    # ------------------------------------------------------------------
+    # Command output — legacy path
+    # ------------------------------------------------------------------
 
     cpdef dict get_gimbal_commands(self, object sbus):
         """
@@ -144,6 +217,47 @@ cdef class ChannelMapper:
             'spotlight_yaw':   spot_yaw,
         }
 
+    # ------------------------------------------------------------------
+    # Command output — modular path
+    # ------------------------------------------------------------------
+
+    cpdef dict get_commands(self, object sbus):
+        """
+        Read all configured axes and return per-gimbal command dicts.
+
+        Requires prior call to initialize_from_gimbals().
+
+        Args:
+            sbus: Any object with get_channel(channel_number: int) -> int.
+
+        Returns:
+            Nested dict: {gimbal_id: {axis_name: angle_degrees}}.
+            Example::
+
+                {
+                    "camera_1":    {"pitch": -30.0, "yaw": 45.0},
+                    "spotlight_1": {"pitch": -15.0, "yaw": 90.0},
+                }
+
+            Gimbals with no mapped channels are omitted from the result.
+        """
+        cdef int ch, raw
+        cdef double mn, mx, angle
+        cdef str gimbal_id, axis_name
+
+        result = {}
+        for (gimbal_id, axis_name), (ch, mn, mx) in self._axis_map.items():
+            raw = sbus.get_channel(ch)
+            angle = self.map_channel_to_angle(raw, mn, mx)
+            if gimbal_id not in result:
+                result[gimbal_id] = {}
+            result[gimbal_id][axis_name] = angle
+        return result
+
+    # ------------------------------------------------------------------
+    # Mode and POI helpers (shared by both paths)
+    # ------------------------------------------------------------------
+
     cpdef int get_mode_index(self, object sbus):
         """
         Return the current mode index from the mode-select channel.
@@ -171,6 +285,10 @@ cdef class ChannelMapper:
                                and raw >= _POI_LOCK_THRESHOLD)
         self._prev_poi_raw = raw
         return triggered
+
+    # ------------------------------------------------------------------
+    # Low-level helpers
+    # ------------------------------------------------------------------
 
     cpdef double map_channel_to_angle(self, int raw_value,
                                       double min_angle, double max_angle):

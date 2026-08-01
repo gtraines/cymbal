@@ -3,6 +3,7 @@ Cython header file for ChannelMapper.
 """
 
 cdef class ChannelMapper:
+    # --- Legacy fields (backward compat) ---
     cdef public int ch_camera_pitch
     cdef public int ch_camera_yaw
     cdef public int ch_spotlight_pitch
@@ -18,8 +19,15 @@ cdef class ChannelMapper:
     # POI lock is edge-triggered: track previous switch state
     cdef int _prev_poi_raw
 
+    # --- Modular per-gimbal/axis mapping ---
+    # dict: (gimbal_id, axis_name) -> (sbus_channel, min_deg, max_deg)
+    cdef dict _axis_map
+
     cpdef bint initialize(self, object config)
+    cpdef bint initialize_from_gimbals(self, list gimbal_defs,
+                                       int mode_channel, int poi_lock_channel)
     cpdef dict get_gimbal_commands(self, object sbus)
+    cpdef dict get_commands(self, object sbus)
     cpdef int get_mode_index(self, object sbus)
     cpdef bint get_poi_lock_triggered(self, object sbus)
     cpdef double map_channel_to_angle(self, int raw_value,

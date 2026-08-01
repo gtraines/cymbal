@@ -1,0 +1,37 @@
+[Unit]
+Description=Cymbal Video/OSD Sidecar — camera capture and telemetry overlay
+Documentation=file:/home/pi/cymbal/docs/SERVICES.md
+After=cymbal-telemetry.service
+Wants=cymbal-telemetry.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/cymbal
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/usr/bin/python3 -m cymbal.video.video_service
+Restart=on-failure
+RestartSec=3s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+StandardOutput=journal
+StandardError=journal
+
+# Resource policy:
+#   Nice=5: lowest priority — OpenCV drawing and camera decode are not
+#   time-critical and must not compete with control (Nice=-10) or telemetry (Nice=0).
+#   CPUAffinity=2 3: share the background core pair with the telemetry sidecar;
+#   both are memory-bound background workloads that benefit from isolation.
+#   MemoryMax=512M: NumPy frame buffers (640×480×3 ≈ 1 MB each), OpenCV
+#   allocations, Python runtime, and potential camera decoder buffers.
+Nice=5
+CPUAffinity=2 3
+MemoryMax=512M
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
