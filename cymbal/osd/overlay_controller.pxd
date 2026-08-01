@@ -69,5 +69,6 @@ cdef class OSDOverlay:
     cdef void _draw_heading_tape(self, object frame, double camera_heading_deg)
     cdef void _draw_crosshair(self, object frame)
     cdef void _draw_target_panel(self, object frame)
+    cdef void _draw_datetime_panel(self, object frame)
     cdef void _put_text_shadowed(self, object frame, str text, int x, int y,
                                   double scale, object color, int thickness)

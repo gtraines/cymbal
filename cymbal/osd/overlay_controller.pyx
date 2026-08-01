@@ -274,7 +274,10 @@ cdef class OSDOverlay:
         # 1. Aircraft panel — top-left
         self._draw_text_box(frame, self._build_aircraft_lines(), 10, 30)
 
-        # 2. Target panel — bottom-right (only when POI is locked)
+        # 2. Datetime panel — bottom-left
+        self._draw_datetime_panel(frame)
+
+        # 3. Target panel — bottom-right (only when POI is locked)
         if self.poi_locked:
             self._draw_target_panel(frame)
 
@@ -311,22 +314,6 @@ cdef class OSDOverlay:
 
         # Panel header
         lines.append("\u2500\u2500 AIRCRAFT \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
-
-        # UTC date-timestamp
-        utc_dt = self._time_fn()
-        ts_utc = utc_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
-        lines.append(ts_utc)
-
-        # Local date-timestamp (when timezone is configured)
-        if self._local_tz is not None:
-            try:
-                utc_aware  = utc_dt.replace(tzinfo=datetime.timezone.utc)
-                local_dt   = utc_aware.astimezone(self._local_tz)
-                tz_abbr    = local_dt.strftime("%Z")
-                ts_local   = local_dt.strftime(f"%Y-%m-%d %H:%M:%S {tz_abbr}")
-                lines.append(ts_local)
-            except Exception:
-                pass  # silently omit local line on conversion error
 
         # Address
         lines.append(self.address or "Unknown address")
@@ -513,6 +500,40 @@ cdef class OSDOverlay:
         cdef int y = fh - panel_height - 10 + lh  # y is baseline of first line
 
         self._draw_text_box(frame, lines, x, y, text_color=_MAGENTA)
+
+    cdef void _draw_datetime_panel(self, object frame):
+        """
+        Draw the UTC and local date-timestamp panel at the bottom-left.
+
+        Shows:
+          YYYY-MM-DD HH:MM:SS UTC
+          YYYY-MM-DD HH:MM:SS MST   (only when local_timezone is configured)
+        """
+        cdef int fh = frame.shape[0]
+        cdef int fw = frame.shape[1]
+
+        lines = []
+        utc_dt = self._time_fn()
+        lines.append(utc_dt.strftime("%Y-%m-%d %H:%M:%S UTC"))
+
+        if self._local_tz is not None:
+            try:
+                utc_aware = utc_dt.replace(tzinfo=datetime.timezone.utc)
+                local_dt  = utc_aware.astimezone(self._local_tz)
+                tz_abbr   = local_dt.strftime("%Z")
+                lines.append(local_dt.strftime(f"%Y-%m-%d %H:%M:%S {tz_abbr}"))
+            except Exception:
+                pass
+
+        cdef int lh  = int(30 * self.font_scale)
+        cdef int pad = 8
+        cdef int panel_height = lh * len(lines) + pad * 2
+
+        # Bottom-left placement (10 px margin)
+        cdef int x = 10
+        cdef int y = fh - panel_height - 10 + lh
+
+        self._draw_text_box(frame, lines, x, y)
 
     cdef void _draw_compass_widget(self, object frame, int cx, int cy,
                                    int radius, double track_deg,

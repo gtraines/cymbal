@@ -167,7 +167,8 @@ class OSDOverlay:
         # Mark the frame so tests can detect that render_frame ran
         if isinstance(frame, dict):
             frame['annotated'] = True
-            frame['lines']     = self._build_aircraft_lines()
+            frame['lines']          = self._build_aircraft_lines()
+            frame['datetime_lines'] = self._build_datetime_lines()
             if self.poi_locked:
                 frame['target_lines'] = self._build_target_lines()
         else:
@@ -186,22 +187,6 @@ class OSDOverlay:
 
         # Panel header
         lines.append("\u2500\u2500 AIRCRAFT \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
-
-        # UTC date-timestamp
-        utc_dt = self._time_fn()
-        ts_utc = utc_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
-        lines.append(ts_utc)
-
-        # Local date-timestamp (when timezone configured)
-        if self._local_tz is not None:
-            try:
-                import datetime as _dt_mod
-                utc_aware = utc_dt.replace(tzinfo=_dt_mod.timezone.utc)
-                local_dt  = utc_aware.astimezone(self._local_tz)
-                tz_abbr   = local_dt.strftime("%Z")
-                lines.append(local_dt.strftime(f"%Y-%m-%d %H:%M:%S {tz_abbr}"))
-            except Exception:
-                pass
 
         # Address
         lines.append(self.address or "Unknown address")
@@ -270,6 +255,22 @@ class OSDOverlay:
     # Keep _build_lines as an alias for backward compatibility
     def _build_lines(self):
         return self._build_aircraft_lines()
+
+    def _build_datetime_lines(self):
+        """Build the bottom-left datetime panel lines."""
+        lines = []
+        utc_dt = self._time_fn()
+        lines.append(utc_dt.strftime("%Y-%m-%d %H:%M:%S UTC"))
+        if self._local_tz is not None:
+            try:
+                import datetime as _dt_mod
+                utc_aware = utc_dt.replace(tzinfo=_dt_mod.timezone.utc)
+                local_dt  = utc_aware.astimezone(self._local_tz)
+                tz_abbr   = local_dt.strftime("%Z")
+                lines.append(local_dt.strftime(f"%Y-%m-%d %H:%M:%S {tz_abbr}"))
+            except Exception:
+                pass
+        return lines
 
     def close(self):
         if self._video_sink is not None:

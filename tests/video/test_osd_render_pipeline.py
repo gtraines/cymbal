@@ -135,9 +135,20 @@ class TestOSDRenderPipeline(unittest.TestCase):
         fill_telemetry(osd)
         frame = {}
         osd.render_frame(frame)
-        lines = frame.get('lines', [])
-        # lines[1] is UTC date-timestamp; contains injected time
-        self.assertIn("09:15:30 UTC", lines[1])
+        # Timestamps are now in their own datetime panel, not the aircraft lines
+        dt_lines = frame.get('datetime_lines', [])
+        self.assertTrue(
+            any("09:15:30 UTC" in l for l in dt_lines),
+            f"Expected timestamp in datetime_lines: {dt_lines}"
+        )
+
+    def test_datetime_panel_always_present(self):
+        osd, sink = make_osd(time_fn=fixed_time("09:15:30 UTC"))
+        fill_telemetry(osd)
+        frame = {}
+        osd.render_frame(frame)
+        self.assertIn('datetime_lines', frame)
+        self.assertGreater(len(frame['datetime_lines']), 0)
 
     # ------------------------------------------------------------------
     # Target panel visibility

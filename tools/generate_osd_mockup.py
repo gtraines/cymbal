@@ -340,12 +340,10 @@ def create_osd_mockup(output_path="docs/osd_mockup.png", width=1280, height=720)
     pad = max(6,  int(9  * scale))   # panel padding
 
     # -------------------------------------------------------------------------
-    # AIRCRAFT PANEL — top-left
+    # AIRCRAFT PANEL — top-left (no timestamps here)
     # -------------------------------------------------------------------------
     aircraft_lines = [
         "\u2500\u2500 AIRCRAFT \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
-        "2026-08-01 17:23:45 UTC",
-        "2026-08-01 10:23:45 MST",
         "123 Main St, Phoenix AZ",
         "Lat: 33.44827  Lon: -112.07400",
         "Alt AGL: 499 ft  GPS Alt: 1476 ft",
@@ -353,6 +351,23 @@ def create_osd_mockup(output_path="docs/osd_mockup.png", width=1280, height=720)
         "Fix: DGPS  Sats: 12",
     ]
     draw_aircraft_panel(draw, 12, 12 + lh, aircraft_lines, font_med, lh, pad)
+
+    # -------------------------------------------------------------------------
+    # DATETIME PANEL — bottom-left
+    # -------------------------------------------------------------------------
+    datetime_lines = [
+        "2026-08-01 17:23:45 UTC",
+        "2026-08-01 10:23:45 MST",
+    ]
+    max_dt_w = max(tw(draw, l, font_med) for l in datetime_lines)
+    dt_panel_h = len(datetime_lines) * lh + pad * 2
+    dt_x = 12
+    dt_y = height - dt_panel_h - 12
+    draw_panel_bg(draw, dt_x - pad, dt_y - pad, max_dt_w + pad * 2, dt_panel_h)
+    ty_dt = dt_y
+    for line in datetime_lines:
+        put_text(draw, dt_x, ty_dt, line, font_med, WHITE)
+        ty_dt += lh
 
     # -------------------------------------------------------------------------
     # HEADING TAPE — top-center
