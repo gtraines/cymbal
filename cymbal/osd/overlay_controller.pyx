@@ -66,6 +66,25 @@ _GREEN   = (0,   255, 0)    # heading tape, crosshair
 _MAGENTA = (255, 0,   255)  # target panel
 _YELLOW  = (0,   215, 255)  # compass N label, camera arrow
 
+# ---------------------------------------------------------------------------
+# Aircraft symbol geometry — used by _draw_compass_widget() below.
+#
+# IMPORTANT: The generate_osd_mockup.py tool uses the IDENTICAL geometry and
+# _rot formula. Any changes here MUST be mirrored in tools/generate_osd_mockup.py
+# (draw_compass function, "HSI aircraft silhouette" section).
+#
+# Body-frame convention for _rot(dx, dy):
+#   dx > 0 = forward (nose direction, coincides with track heading on screen)
+#   dy > 0 = starboard (right wing)
+#   dx < 0 = aft (tail)
+#   dy < 0 = port (left wing)
+#
+# Verification at track_deg = 0 (north):
+#   _rot(+r, 0) → (cx, cy-r)  = directly above center = north  ✓
+#   _rot( 0,+r) → (cx+r, cy)  = directly right  = east   ✓
+#   _rot(-r, 0) → (cx, cy+r)  = directly below  = south  ✓
+# ---------------------------------------------------------------------------
+
 
 cdef class OSDOverlay:
     """
@@ -84,7 +103,7 @@ cdef class OSDOverlay:
 
     def __init__(self, config=None, time_fn=None):
         self.enabled = True
-        self.font_scale = 0.65
+        self.font_scale = 0.72          # bumped from 0.65 for legibility
         self.font_thickness = 2
         self._text_color = (255, 255, 255)
         self._bg_color = (0, 0, 0)
@@ -443,7 +462,7 @@ cdef class OSDOverlay:
         the text in `color` at (x, y).  This prevents washout over bright video.
         """
         cv2.putText(frame, text, (x + 1, y + 1), _FONT, scale,
-                    _BLACK, thickness + 1, cv2.LINE_AA)
+                    _BLACK, thickness + 2, cv2.LINE_AA)
         cv2.putText(frame, text, (x, y), _FONT, scale,
                     color, thickness, cv2.LINE_AA)
 
@@ -457,20 +476,20 @@ cdef class OSDOverlay:
         cdef int fw = frame.shape[1]
         cdef int cx = fw // 2
         cdef int cy = fh // 2
-        cdef int arm = 20   # length of each arm
-        cdef int gap = 6    # gap between center and start of each arm
+        cdef int arm = 26   # length of each arm
+        cdef int gap = 8    # gap between center and start of each arm
 
         # Shadow pass
-        cv2.line(frame, (cx - arm - gap, cy), (cx - gap, cy), _BLACK, 3, cv2.LINE_AA)
-        cv2.line(frame, (cx + gap, cy), (cx + arm + gap, cy), _BLACK, 3, cv2.LINE_AA)
-        cv2.line(frame, (cx, cy - arm - gap), (cx, cy - gap), _BLACK, 3, cv2.LINE_AA)
-        cv2.line(frame, (cx, cy + gap), (cx, cy + arm + gap), _BLACK, 3, cv2.LINE_AA)
+        cv2.line(frame, (cx - arm - gap, cy), (cx - gap, cy), _BLACK, 5, cv2.LINE_AA)
+        cv2.line(frame, (cx + gap, cy), (cx + arm + gap, cy), _BLACK, 5, cv2.LINE_AA)
+        cv2.line(frame, (cx, cy - arm - gap), (cx, cy - gap), _BLACK, 5, cv2.LINE_AA)
+        cv2.line(frame, (cx, cy + gap), (cx, cy + arm + gap), _BLACK, 5, cv2.LINE_AA)
 
         # Green lines
-        cv2.line(frame, (cx - arm - gap, cy), (cx - gap, cy), _GREEN, 2, cv2.LINE_AA)
-        cv2.line(frame, (cx + gap, cy), (cx + arm + gap, cy), _GREEN, 2, cv2.LINE_AA)
-        cv2.line(frame, (cx, cy - arm - gap), (cx, cy - gap), _GREEN, 2, cv2.LINE_AA)
-        cv2.line(frame, (cx, cy + gap), (cx, cy + arm + gap), _GREEN, 2, cv2.LINE_AA)
+        cv2.line(frame, (cx - arm - gap, cy), (cx - gap, cy), _GREEN, 3, cv2.LINE_AA)
+        cv2.line(frame, (cx + gap, cy), (cx + arm + gap, cy), _GREEN, 3, cv2.LINE_AA)
+        cv2.line(frame, (cx, cy - arm - gap), (cx, cy - gap), _GREEN, 3, cv2.LINE_AA)
+        cv2.line(frame, (cx, cy + gap), (cx, cy + arm + gap), _GREEN, 3, cv2.LINE_AA)
 
     cdef void _draw_target_panel(self, object frame):
         """Draw the target/POI information panel at the bottom-right."""
@@ -577,7 +596,8 @@ cdef class OSDOverlay:
 
         # Ring — brighter when fix available, thicker
         ring_color = (200, 200, 200) if have_track else (70, 70, 70)
-        cv2.circle(frame, (cx, cy), radius, ring_color, 2, cv2.LINE_AA)
+        cv2.circle(frame, (cx, cy), radius, _BLACK,     4, cv2.LINE_AA)
+        cv2.circle(frame, (cx, cy), radius, ring_color, 3, cv2.LINE_AA)
 
         # Cardinal tick marks + prominent "N" label
         cardinal_angles = [0.0, 90.0, 180.0, 270.0]
@@ -586,24 +606,26 @@ cdef class OSDOverlay:
             card_rad = cardinal_angles[i] * pi / 180.0
             s = math.sin(card_rad)
             c = math.cos(card_rad)
-            inner_r = radius - 7
+            inner_r = radius - 8
             outer_r = radius
             ix = int(cx + inner_r * s)
             iy = int(cy - inner_r * c)
             ox = int(cx + outer_r * s)
             oy = int(cy - outer_r * c)
-            cv2.line(frame, (ix, iy), (ox, oy), ring_color, 2, cv2.LINE_AA)
+            cv2.line(frame, (ix, iy), (ox, oy), _BLACK,     4, cv2.LINE_AA)
+            cv2.line(frame, (ix, iy), (ox, oy), ring_color, 3, cv2.LINE_AA)
 
             lbl = cardinal_labels[i]
-            lscale = 0.55 if i == 0 else 0.38
+            lscale = 0.60 if i == 0 else 0.42
             lthick = 2    if i == 0 else 1
             lcolor = _YELLOW if i == 0 else ring_color
-            tx = int(cx + (outer_r + 10) * s) - 5
-            ty = int(cy - (outer_r + 10) * c) + 5
+            tx = int(cx + (outer_r + 12) * s) - 5
+            ty = int(cy - (outer_r + 12) * c) + 5
             self._put_text_shadowed(frame, lbl, tx, ty, lscale, lcolor, lthick)
 
         # Aircraft symbol: HSI-style silhouette
-        # Nose triangle (filled) + fuselage line + swept wings + stabilizer bar
+        # Body-frame convention (see comment block above OSDOverlay class):
+        #   _rot(dx, dy) where dx=+r → nose/forward, dy=+r → starboard wing
         # Camera arrow is drawn AFTER so it always renders on top.
         if have_track:
             track_rad = track_deg * pi / 180.0
@@ -611,45 +633,45 @@ cdef class OSDOverlay:
             cos_t = math.cos(track_rad)
 
             def _rot(dx, dy):
-                """Rotate (dx, dy) by track_rad and offset to compass center."""
+                """Rotate body-frame (dx=fwd, dy=stbd) to screen coords."""
                 return (int(cx + dx * sin_t + dy * cos_t),
                         int(cy - dx * cos_t + dy * sin_t))
 
-            # Key points (body-frame: +y = aft, +x = starboard)
-            nose_tip = _rot(0,              -int(radius * 0.78))
-            nose_l   = _rot(-int(radius * 0.10), -int(radius * 0.50))
-            nose_r   = _rot( int(radius * 0.10), -int(radius * 0.50))
-            fus_top  = _rot(0,              -int(radius * 0.50))
-            fus_bot  = _rot(0,               int(radius * 0.62))
-            wing_fwd = _rot(0,              -int(radius * 0.04))
-            wl       = _rot(-int(radius * 0.70),  int(radius * 0.20))
-            wr       = _rot( int(radius * 0.70),  int(radius * 0.20))
-            stab_l   = _rot(-int(radius * 0.27),  int(radius * 0.54))
-            stab_r   = _rot( int(radius * 0.27),  int(radius * 0.54))
+            # Key points (body-frame: dx=fwd/nose, dy=starboard)
+            nose_tip = _rot( int(radius * 0.78),  0)
+            nose_l   = _rot( int(radius * 0.50), -int(radius * 0.09))
+            nose_r   = _rot( int(radius * 0.50),  int(radius * 0.09))
+            fus_top  = _rot( int(radius * 0.50),  0)
+            fus_bot  = _rot(-int(radius * 0.60),  0)
+            wing_fwd = _rot( int(radius * 0.05),  0)
+            wl       = _rot(-int(radius * 0.18), -int(radius * 0.70))
+            wr       = _rot(-int(radius * 0.18),  int(radius * 0.70))
+            stab_l   = _rot(-int(radius * 0.52), -int(radius * 0.25))
+            stab_r   = _rot(-int(radius * 0.52),  int(radius * 0.25))
 
             import numpy as _np_sym
 
-            # --- Shadow pass (all elements, black, thick) ---
-            cv2.line(frame, fus_top, fus_bot, _BLACK, 4, cv2.LINE_AA)
-            cv2.line(frame, wing_fwd, wl,     _BLACK, 4, cv2.LINE_AA)
-            cv2.line(frame, wing_fwd, wr,     _BLACK, 4, cv2.LINE_AA)
-            cv2.line(frame, stab_l, stab_r,   _BLACK, 4, cv2.LINE_AA)
+            # Shadow pass (black, thick)
+            cv2.line(frame, fus_top, fus_bot, _BLACK, 5, cv2.LINE_AA)
+            cv2.line(frame, wing_fwd, wl,     _BLACK, 5, cv2.LINE_AA)
+            cv2.line(frame, wing_fwd, wr,     _BLACK, 5, cv2.LINE_AA)
+            cv2.line(frame, stab_l, stab_r,   _BLACK, 5, cv2.LINE_AA)
             cv2.fillPoly(frame,
                          [_np_sym.array([nose_tip, nose_l, nose_r], dtype=_np_sym.int32)],
                          _BLACK)
 
-            # --- Fill pass (white, thinner) ---
-            cv2.line(frame, fus_top, fus_bot, _WHITE, 2, cv2.LINE_AA)
-            cv2.line(frame, wing_fwd, wl,     _WHITE, 2, cv2.LINE_AA)
-            cv2.line(frame, wing_fwd, wr,     _WHITE, 2, cv2.LINE_AA)
-            cv2.line(frame, stab_l, stab_r,   _WHITE, 2, cv2.LINE_AA)
+            # Fill pass (white, thinner)
+            cv2.line(frame, fus_top, fus_bot, _WHITE, 3, cv2.LINE_AA)
+            cv2.line(frame, wing_fwd, wl,     _WHITE, 3, cv2.LINE_AA)
+            cv2.line(frame, wing_fwd, wr,     _WHITE, 3, cv2.LINE_AA)
+            cv2.line(frame, stab_l, stab_r,   _WHITE, 3, cv2.LINE_AA)
             cv2.fillPoly(frame,
                          [_np_sym.array([nose_tip, nose_l, nose_r], dtype=_np_sym.int32)],
                          _WHITE)
 
-            # Center dot (pivot reference)
-            cv2.circle(frame, (cx, cy), 3, _BLACK, -1, cv2.LINE_AA)
-            cv2.circle(frame, (cx, cy), 2, _WHITE, -1, cv2.LINE_AA)
+            # Center pivot dot
+            cv2.circle(frame, (cx, cy), 4, _BLACK, -1, cv2.LINE_AA)
+            cv2.circle(frame, (cx, cy), 3, _WHITE, -1, cv2.LINE_AA)
 
         # Camera aim arrow (yellow)
         if have_cam:
@@ -659,9 +681,9 @@ cdef class OSDOverlay:
             cax = int(cx + cam_len * math.sin(cam_abs_rad))
             cay = int(cy - cam_len * math.cos(cam_abs_rad))
             cv2.arrowedLine(frame, (cx, cy), (cax, cay),
-                            _BLACK, 4, cv2.LINE_AA, tipLength=0.33)
+                            _BLACK, 5, cv2.LINE_AA, tipLength=0.33)
             cv2.arrowedLine(frame, (cx, cy), (cax, cay),
-                            _YELLOW, 2, cv2.LINE_AA, tipLength=0.33)
+                            _YELLOW, 3, cv2.LINE_AA, tipLength=0.33)
 
         # Text labels below the ring
         label_y = cy + radius + 18

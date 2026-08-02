@@ -14,12 +14,26 @@ Output:
     docs/osd_mockup.png - Visual representation of OSD layout
 
 Elements rendered (matching overlay_controller.pyx exactly):
-  Top-left  : Aircraft panel (white) — header, UTC + local date-timestamps,
-               address, lat/lon, Alt AGL / GPS Alt (ft), GndSpd (mph, True), fix
-  Top-center: Scrolling heading tape (green) — ticks, cardinals, chevron, box
-  Top-right : Compass widget — aircraft outline symbol, N/E/S/W, camera arrow
-  Center    : Crosshair (green, four-arm with gap)
-  Bot-right : Target panel (magenta) — lat/lon, elevation, slant range, address
+  Top-left   : Aircraft panel (white) — header, address, lat/lon,
+                Alt AGL / GPS Alt (ft), GndSpd (mph, True), fix/sats
+  Top-center : Scrolling heading tape (green) — ticks, cardinals, chevron, box
+  Top-right  : Compass widget — aircraft HSI symbol, N/E/S/W, camera arrow
+  Center     : Crosshair (green, four-arm with gap)
+  Bot-left   : Datetime panel (white) — UTC + local date-timestamps
+  Bot-right  : Target panel (magenta) — lat/lon, elevation, slant range, address
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+SYNC WARNING — this file must stay in sync with overlay_controller.pyx:
+  - Aircraft HSI symbol: geometry and _rot formula
+      See: cymbal/osd/overlay_controller.pyx  _draw_compass_widget()
+  - Heading tape: dimensions, tick spacing, box size
+      See: cymbal/osd/overlay_controller.pyx  _draw_heading_tape()
+  - Crosshair: arm length, gap, line thickness
+      See: cymbal/osd/overlay_controller.pyx  _draw_crosshair()
+  - Panel content: aircraft/target/datetime line format
+      See: cymbal/osd/overlay_controller.pyx  _build_*_lines()
+After changing overlay_controller.pyx, re-run this tool and commit the PNG.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 """
 
 import math
@@ -33,7 +47,7 @@ except ImportError:
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
-# Colour constants (RGB for Pillow)
+# Colour constants (RGB for Pillow — note OSD uses BGR for OpenCV)
 # ---------------------------------------------------------------------------
 WHITE   = (255, 255, 255)
 BLACK   = (0,   0,   0)
@@ -98,9 +112,16 @@ def draw_panel_bg(draw, x, y, w, h, radius=4):
 
 
 def draw_rect_outline(draw, x1, y1, x2, y2, color, width=2):
-    """Draw a rectangle outline with a black shadow."""
-    draw.rectangle([x1 - 1, y1 - 1, x2 + 1, y2 + 1], outline=BLACK, width=width + 1)
+    """Draw a rectangle outline with a thicker black shadow behind it."""
+    draw.rectangle([x1 - 1, y1 - 1, x2 + 1, y2 + 1], outline=BLACK, width=width + 2)
     draw.rectangle([x1, y1, x2, y2], outline=color, width=width)
+
+
+def put_text(draw, x, y, text, font, color):
+    """Draw text with a doubled black shadow offset for video readability."""
+    draw.text((x + 1, y + 1), text, fill=BLACK, font=font)
+    draw.text((x + 1, y + 1), text, fill=BLACK, font=font)  # draw twice = denser shadow
+    draw.text((x, y), text, fill=color, font=font)
 
 
 # ---------------------------------------------------------------------------
@@ -128,21 +149,22 @@ def draw_target_panel(draw, width, height, lines, font, lh, pad):
         y += lh
 
 
-def draw_crosshair(draw, cx, cy, arm=30, gap=8):
+def draw_crosshair(draw, cx, cy, arm=36, gap=9):
+    """Four-arm crosshair — arm and gap match overlay_controller.pyx _draw_crosshair."""
     for p1, p2 in [
         ((cx - arm - gap, cy), (cx - gap, cy)),
         ((cx + gap, cy),       (cx + arm + gap, cy)),
         ((cx, cy - arm - gap), (cx, cy - gap)),
         ((cx, cy + gap),       (cx, cy + arm + gap)),
     ]:
-        draw.line([p1[0], p1[1], p2[0], p2[1]], fill=BLACK, width=4)
+        draw.line([p1[0], p1[1], p2[0], p2[1]], fill=BLACK, width=6)
     for p1, p2 in [
         ((cx - arm - gap, cy), (cx - gap, cy)),
         ((cx + gap, cy),       (cx + arm + gap, cy)),
         ((cx, cy - arm - gap), (cx, cy - gap)),
         ((cx, cy + gap),       (cx, cy + arm + gap)),
     ]:
-        draw.line([p1[0], p1[1], p2[0], p2[1]], fill=GREEN, width=2)
+        draw.line([p1[0], p1[1], p2[0], p2[1]], fill=GREEN, width=3)
 
 
 def draw_heading_tape(draw, cx, y, tape_w, tape_h, heading_deg,
@@ -212,15 +234,24 @@ def draw_compass(draw, ccx, ccy, cr, track_deg, cam_yaw,
     """
     Compass widget: HSI-style aircraft silhouette + camera arrow + N/E/S/W labels.
 
-    Drawing order: ring → cardinals → aircraft symbol → camera arrow (on top).
+    SYNC: geometry and _rot formula must match overlay_controller.pyx
+          _draw_compass_widget() exactly.
+
+    Body-frame convention for rot(dx, dy):
+      dx > 0 = forward (nose/heading direction on screen)
+      dy > 0 = starboard (right wing)
+    Verification at track_deg=0: rot(+r,0) -> (ccx, ccy-r) = north/up  OK
+    Drawing order: ring -> cardinals -> aircraft -> camera arrow (on top).
     """
 
     # Background disc
     draw.ellipse([ccx - cr - 14, ccy - cr - 14,
                   ccx + cr + 14, ccy + cr + 14], fill=DARK_BG)
 
-    # Ring
-    draw.ellipse([ccx - cr, ccy - cr, ccx + cr, ccy + cr], outline=GRAY, width=2)
+    # Ring — shadow then fill (thicker)
+    draw.ellipse([ccx - cr - 1, ccy - cr - 1, ccx + cr + 1, ccy + cr + 1],
+                 outline=BLACK, width=5)
+    draw.ellipse([ccx - cr, ccy - cr, ccx + cr, ccy + cr], outline=GRAY, width=3)
 
     # Cardinal ticks + labels
     for angle, lbl, color, bold in [
@@ -230,38 +261,47 @@ def draw_compass(draw, ccx, ccy, cr, track_deg, cam_yaw,
         (270, "W", GRAY,   False),
     ]:
         rad = math.radians(angle)
-        ir = cr - 8
+        ir = cr - 9
+        # Shadow tick
         draw.line([int(ccx + ir * math.sin(rad)), int(ccy - ir * math.cos(rad)),
                    int(ccx + cr * math.sin(rad)), int(ccy - cr * math.cos(rad))],
-                  fill=GRAY, width=2)
+                  fill=BLACK, width=5)
+        # Coloured tick
+        draw.line([int(ccx + ir * math.sin(rad)), int(ccy - ir * math.cos(rad)),
+                   int(ccx + cr * math.sin(rad)), int(ccy - cr * math.cos(rad))],
+                  fill=GRAY, width=3)
         font = font_med if bold else font_sm
-        tx = int(ccx + (cr + 13) * math.sin(rad))
-        ty = int(ccy - (cr + 13) * math.cos(rad))
+        tx = int(ccx + (cr + 14) * math.sin(rad))
+        ty = int(ccy - (cr + 14) * math.cos(rad))
         lw2 = tw(draw, lbl, font)
         lh2 = th(draw, lbl, font)
         put_text(draw, tx - lw2 // 2, ty - lh2 // 2, lbl, font, color)
 
     # -------------------------------------------------------------------------
-    # HSI-style aircraft silhouette (same geometry as overlay_controller.pyx)
+    # HSI-style aircraft silhouette
+    # SYNC with overlay_controller.pyx _draw_compass_widget():
+    #   rot(dx=fwd, dy=stbd) — same formula as _rot() in the Cython file
     # -------------------------------------------------------------------------
     tr = math.radians(track_deg)
     st = math.sin(tr)
     ct2 = math.cos(tr)
 
     def rot(dx, dy):
+        """Body-frame (dx=fwd, dy=stbd) -> screen coords. Matches Cython _rot."""
         return (int(ccx + dx * st + dy * ct2),
                 int(ccy - dx * ct2 + dy * st))
 
-    nose_tip = rot(0,               -int(cr * 0.78))
-    nose_l   = rot(-int(cr * 0.10), -int(cr * 0.50))
-    nose_r   = rot( int(cr * 0.10), -int(cr * 0.50))
-    fus_top  = rot(0,               -int(cr * 0.50))
-    fus_bot  = rot(0,                int(cr * 0.62))
-    wing_fwd = rot(0,               -int(cr * 0.04))
-    wl       = rot(-int(cr * 0.70),  int(cr * 0.20))
-    wr       = rot( int(cr * 0.70),  int(cr * 0.20))
-    stab_l   = rot(-int(cr * 0.27),  int(cr * 0.54))
-    stab_r   = rot( int(cr * 0.27),  int(cr * 0.54))
+    # Correct geometry (dx=forward, dy=starboard):
+    nose_tip = rot( int(cr * 0.78),  0)
+    nose_l   = rot( int(cr * 0.50), -int(cr * 0.09))
+    nose_r   = rot( int(cr * 0.50),  int(cr * 0.09))
+    fus_top  = rot( int(cr * 0.50),  0)
+    fus_bot  = rot(-int(cr * 0.60),  0)
+    wing_fwd = rot( int(cr * 0.05),  0)
+    wl       = rot(-int(cr * 0.18), -int(cr * 0.70))
+    wr       = rot(-int(cr * 0.18),  int(cr * 0.70))
+    stab_l   = rot(-int(cr * 0.52), -int(cr * 0.25))
+    stab_r   = rot(-int(cr * 0.52),  int(cr * 0.25))
 
     segs = [
         (fus_top, fus_bot),
@@ -270,37 +310,37 @@ def draw_compass(draw, ccx, ccy, cr, track_deg, cam_yaw,
         (stab_l, stab_r),
     ]
 
-    # Shadow pass
+    # Shadow pass (black, thick)
     for a, b in segs:
-        draw.line([a[0]+1, a[1]+1, b[0]+1, b[1]+1], fill=BLACK, width=4)
+        draw.line([a[0]+1, a[1]+1, b[0]+1, b[1]+1], fill=BLACK, width=6)
     draw.polygon([nose_tip, nose_l, nose_r], fill=BLACK, outline=BLACK)
 
-    # Fill pass
+    # Fill pass (white, thinner)
     for a, b in segs:
-        draw.line([a[0], a[1], b[0], b[1]], fill=WHITE, width=2)
+        draw.line([a[0], a[1], b[0], b[1]], fill=WHITE, width=3)
     draw.polygon([nose_tip, nose_l, nose_r], fill=WHITE, outline=WHITE)
 
     # Center pivot dot
-    draw.ellipse([ccx-4, ccy-4, ccx+4, ccy+4], fill=BLACK)
-    draw.ellipse([ccx-3, ccy-3, ccx+3, ccy+3], fill=WHITE)
+    draw.ellipse([ccx-5, ccy-5, ccx+5, ccy+5], fill=BLACK)
+    draw.ellipse([ccx-4, ccy-4, ccx+4, ccy+4], fill=WHITE)
 
     # -------------------------------------------------------------------------
-    # Camera aim arrow — drawn LAST so it's always on top of the aircraft symbol
+    # Camera aim arrow — drawn LAST so it is always on top
     # -------------------------------------------------------------------------
     cam_rad = math.radians(track_deg + cam_yaw)
     cam_len = int(cr * 0.65)
     cax = int(ccx + cam_len * math.sin(cam_rad))
     cay = int(ccy - cam_len * math.cos(cam_rad))
 
-    draw.line([ccx+1, ccy+1, cax+1, cay+1], fill=BLACK, width=4)
-    draw.line([ccx, ccy, cax, cay], fill=YELLOW, width=2)
+    draw.line([ccx+1, ccy+1, cax+1, cay+1], fill=BLACK, width=6)
+    draw.line([ccx, ccy, cax, cay], fill=YELLOW, width=3)
 
     for delta in [150, -150]:
         ha = math.radians(delta)
-        hx = int(cax + 10 * math.sin(cam_rad + ha))
-        hy = int(cay - 10 * math.cos(cam_rad + ha))
-        draw.line([cax+1, cay+1, hx+1, hy+1], fill=BLACK, width=4)
-        draw.line([cax, cay, hx, hy], fill=YELLOW, width=2)
+        hx = int(cax + 11 * math.sin(cam_rad + ha))
+        hy = int(cay - 11 * math.cos(cam_rad + ha))
+        draw.line([cax+1, cay+1, hx+1, hy+1], fill=BLACK, width=6)
+        draw.line([cax, cay, hx, hy], fill=YELLOW, width=3)
 
     # Labels (left-aligned below disc)
     lbl_x = ccx - cr
@@ -328,16 +368,16 @@ def create_osd_mockup(output_path="docs/osd_mockup.png", width=1280, height=720)
         if y_off < height:
             draw.rectangle([0, y_off, width, y_off + 10], fill=(55, 85, 65, 35))
 
-    # Scale fonts to resolution (base at 1280x720)
+    # Scale fonts to resolution (base at 1280x720), +10% bump for legibility
     scale = min(width / 1280, height / 720)
     font_med, font_sm, font_xs = load_fonts(
-        size_med=max(11, int(16 * scale)),
-        size_sm =max(9,  int(13 * scale)),
-        size_xs =max(8,  int(11 * scale)),
+        size_med=max(12, int(18 * scale)),   # was 16
+        size_sm =max(10, int(15 * scale)),   # was 13
+        size_xs =max(9,  int(12 * scale)),   # was 11
     )
 
-    lh  = max(18, int(22 * scale))   # line height
-    pad = max(6,  int(9  * scale))   # panel padding
+    lh  = max(20, int(25 * scale))   # line height (was 22)
+    pad = max(7,  int(10 * scale))   # panel padding (was 9)
 
     # -------------------------------------------------------------------------
     # AIRCRAFT PANEL — top-left (no timestamps here)
@@ -383,18 +423,18 @@ def create_osd_mockup(output_path="docs/osd_mockup.png", width=1280, height=720)
     # -------------------------------------------------------------------------
     # COMPASS WIDGET — top-right (moved inward to avoid clipping)
     # -------------------------------------------------------------------------
-    cr  = max(45, int(min(width, height) * 0.07))
-    ccx = width - cr - 80      # leave room for labels to the right/below
-    ccy = cr + 20
+    cr  = max(52, int(min(width, height) * 0.08))   # +10% from 0.07
+    ccx = width - cr - 90      # leave room for labels below
+    ccy = cr + 22
     draw_compass(draw, ccx, ccy, cr,
                  track_deg=45.0, cam_yaw=15.0,
                  font_med=font_med, font_sm=font_sm, font_xs=font_xs)
 
     # -------------------------------------------------------------------------
-    # CROSSHAIR — frame center
+    # CROSSHAIR — frame center (arm/gap match overlay_controller.pyx values)
     # -------------------------------------------------------------------------
-    arm = max(24, int(min(width, height) * 0.04))
-    gap = max(6,  int(min(width, height) * 0.012))
+    arm = max(28, int(min(width, height) * 0.045))
+    gap = max(8,  int(min(width, height) * 0.014))
     draw_crosshair(draw, width // 2, height // 2, arm=arm, gap=gap)
 
     # -------------------------------------------------------------------------
