@@ -40,6 +40,8 @@ Usage:
 import datetime
 import logging
 import math
+import os as _os_mod
+import re as _re_mod
 
 try:
     import cv2
@@ -67,23 +69,82 @@ _MAGENTA = (255, 0,   255)  # target panel
 _YELLOW  = (0,   215, 255)  # compass N label, camera arrow
 
 # ---------------------------------------------------------------------------
-# Aircraft symbol geometry — used by _draw_compass_widget() below.
+# Aircraft SVG silhouette — loaded from cymbal/osd/a0.svg at import time.
 #
-# IMPORTANT: The generate_osd_mockup.py tool uses the IDENTICAL geometry and
-# _rot formula. Any changes here MUST be mirrored in tools/generate_osd_mockup.py
-# (draw_compass function, "HSI aircraft silhouette" section).
+# _AIRCRAFT_POLYGON is a list of (nx, ny) normalized coords where:
+#   nx ∈ [-1, 1]  : lateral (positive = starboard/right)
+#   ny ∈ [-1, 1]  : longitudinal (positive = aft, negative = forward/nose)
 #
-# Body-frame convention for _rot(dx, dy):
-#   dx > 0 = forward (nose direction, coincides with track heading on screen)
-#   dy > 0 = starboard (right wing)
-#   dx < 0 = aft (tail)
-#   dy < 0 = port (left wing)
+# Rendering body-frame mapping (same _rot convention used below):
+#   dx = -ny * radius   (forward = negative ny)
+#   dy =  nx * radius   (starboard = positive nx)
 #
-# Verification at track_deg = 0 (north):
-#   _rot(+r, 0) → (cx, cy-r)  = directly above center = north  ✓
-#   _rot( 0,+r) → (cx+r, cy)  = directly right  = east   ✓
-#   _rot(-r, 0) → (cx, cy+r)  = directly below  = south  ✓
+# IMPORTANT: generate_osd_mockup.py must use the SAME SVG and mapping.
+#            Run tools/generate_osd_mockup.py after any SVG change.
 # ---------------------------------------------------------------------------
+
+def _load_aircraft_svg():
+    """Parse cymbal/osd/a0.svg → normalized polygon [(nx, ny), ...]."""
+    try:
+        svg_path = _os_mod.path.join(
+            _os_mod.path.dirname(_os_mod.path.abspath(__file__)), 'a0.svg')
+        with open(svg_path) as _f:
+            _svg = _f.read()
+    except Exception:
+        return None
+
+    _path_m = _re_mod.search(r'<path[^>]+>', _svg, _re_mod.DOTALL)
+    if not _path_m:
+        return None
+    _d_m = _re_mod.search(r'\sd="([^"]+)"', _path_m.group(0), _re_mod.DOTALL)
+    if not _d_m:
+        return None
+    _path_d = _d_m.group(1)
+
+    _t_m = _re_mod.search(r'transform="matrix\(([^)]+)\)"', _svg)
+    if not _t_m:
+        return None
+    _ta, _tb, _tc, _td, _te, _tf = [float(v) for v in _t_m.group(1).split(',')]
+
+    def _samp(p0, p1, p2, p3, n=8):
+        pts = []
+        for _i in range(n + 1):
+            _t = _i / n; _mt = 1 - _t
+            pts.append((
+                _mt**3*p0[0] + 3*_mt**2*_t*p1[0] + 3*_mt*_t**2*p2[0] + _t**3*p3[0],
+                _mt**3*p0[1] + 3*_mt**2*_t*p1[1] + 3*_mt*_t**2*p2[1] + _t**3*p3[1],
+            ))
+        return pts
+
+    _toks = _re_mod.findall(r'[MLCZz]|[+-]?(?:\d+\.?\d*|\.\d+)', _path_d)
+    _raw = []; _cur = (0.0, 0.0); _i = 0; _cmd = None
+    while _i < len(_toks):
+        _tk = _toks[_i]
+        if _tk in ('M', 'L', 'C', 'Z', 'z'):
+            _cmd = _tk; _i += 1; continue
+        if _cmd == 'M':
+            _cur = (float(_toks[_i]), float(_toks[_i+1]))
+            _raw.append(_cur); _i += 2
+        elif _cmd == 'L':
+            _cur = (float(_toks[_i]), float(_toks[_i+1]))
+            _raw.append(_cur); _i += 2
+        elif _cmd == 'C':
+            _p1 = (float(_toks[_i]),   float(_toks[_i+1]))
+            _p2 = (float(_toks[_i+2]), float(_toks[_i+3]))
+            _p3 = (float(_toks[_i+4]), float(_toks[_i+5]))
+            _raw.extend(_samp(_cur, _p1, _p2, _p3, n=8)[1:])
+            _cur = _p3; _i += 6
+        else:
+            _i += 1
+
+    if not _raw:
+        return None
+
+    _tx = [(_ta*x + _tc*y + _te, _tb*x + _td*y + _tf) for x, y in _raw]
+    return [((px - 100.0) / 100.0, (py - 100.0) / 100.0) for px, py in _tx]
+
+
+_AIRCRAFT_POLYGON = _load_aircraft_svg()
 
 
 cdef class OSDOverlay:
@@ -623,10 +684,7 @@ cdef class OSDOverlay:
             ty = int(cy - (outer_r + 12) * c) + 5
             self._put_text_shadowed(frame, lbl, tx, ty, lscale, lcolor, lthick)
 
-        # Aircraft symbol: HSI-style silhouette
-        # Body-frame convention (see comment block above OSDOverlay class):
-        #   _rot(dx, dy) where dx=+r → nose/forward, dy=+r → starboard wing
-        # Camera arrow is drawn AFTER so it always renders on top.
+        # Aircraft symbol from SVG (a0.svg), falling back to geometric lines
         if have_track:
             track_rad = track_deg * pi / 180.0
             sin_t = math.sin(track_rad)
@@ -637,37 +695,41 @@ cdef class OSDOverlay:
                 return (int(cx + dx * sin_t + dy * cos_t),
                         int(cy - dx * cos_t + dy * sin_t))
 
-            # Key points (body-frame: dx=fwd/nose, dy=starboard)
-            nose_tip = _rot( int(radius * 0.78),  0)
-            nose_l   = _rot( int(radius * 0.50), -int(radius * 0.09))
-            nose_r   = _rot( int(radius * 0.50),  int(radius * 0.09))
-            fus_top  = _rot( int(radius * 0.50),  0)
-            fus_bot  = _rot(-int(radius * 0.60),  0)
-            wing_fwd = _rot( int(radius * 0.05),  0)
-            wl       = _rot(-int(radius * 0.18), -int(radius * 0.70))
-            wr       = _rot(-int(radius * 0.18),  int(radius * 0.70))
-            stab_l   = _rot(-int(radius * 0.52), -int(radius * 0.25))
-            stab_r   = _rot(-int(radius * 0.52),  int(radius * 0.25))
-
             import numpy as _np_sym
 
-            # Shadow pass (black, thick)
-            cv2.line(frame, fus_top, fus_bot, _BLACK, 5, cv2.LINE_AA)
-            cv2.line(frame, wing_fwd, wl,     _BLACK, 5, cv2.LINE_AA)
-            cv2.line(frame, wing_fwd, wr,     _BLACK, 5, cv2.LINE_AA)
-            cv2.line(frame, stab_l, stab_r,   _BLACK, 5, cv2.LINE_AA)
-            cv2.fillPoly(frame,
-                         [_np_sym.array([nose_tip, nose_l, nose_r], dtype=_np_sym.int32)],
-                         _BLACK)
-
-            # Fill pass (white, thinner)
-            cv2.line(frame, fus_top, fus_bot, _WHITE, 3, cv2.LINE_AA)
-            cv2.line(frame, wing_fwd, wl,     _WHITE, 3, cv2.LINE_AA)
-            cv2.line(frame, wing_fwd, wr,     _WHITE, 3, cv2.LINE_AA)
-            cv2.line(frame, stab_l, stab_r,   _WHITE, 3, cv2.LINE_AA)
-            cv2.fillPoly(frame,
-                         [_np_sym.array([nose_tip, nose_l, nose_r], dtype=_np_sym.int32)],
-                         _WHITE)
+            if _AIRCRAFT_POLYGON is not None:
+                # Build screen polygon: SVG nx=stbd, ny=aft (nose at ny=-1)
+                # Body-frame: dx=fwd=-ny, dy=stbd=nx
+                pts = [_rot(int(-ny * radius), int(nx * radius))
+                       for nx, ny in _AIRCRAFT_POLYGON]
+                arr = _np_sym.array(pts, dtype=_np_sym.int32)
+                # Black outline shadow, then white fill
+                cv2.polylines(frame, [arr], True, _BLACK, 4, cv2.LINE_AA)
+                cv2.fillPoly(frame, [arr], _WHITE)
+            else:
+                # Geometric fallback (if SVG unavailable)
+                nose_tip = _rot( int(radius * 0.78),  0)
+                nose_l   = _rot( int(radius * 0.50), -int(radius * 0.09))
+                nose_r   = _rot( int(radius * 0.50),  int(radius * 0.09))
+                fus_top  = _rot( int(radius * 0.50),  0)
+                fus_bot  = _rot(-int(radius * 0.60),  0)
+                wing_fwd = _rot( int(radius * 0.05),  0)
+                wl       = _rot(-int(radius * 0.18), -int(radius * 0.70))
+                wr       = _rot(-int(radius * 0.18),  int(radius * 0.70))
+                stab_l   = _rot(-int(radius * 0.52), -int(radius * 0.25))
+                stab_r   = _rot(-int(radius * 0.52),  int(radius * 0.25))
+                segs = [(fus_top, fus_bot), (wing_fwd, wl),
+                        (wing_fwd, wr), (stab_l, stab_r)]
+                for a, b in segs:
+                    cv2.line(frame, a, b, _BLACK, 5, cv2.LINE_AA)
+                cv2.fillPoly(frame,
+                             [_np_sym.array([nose_tip, nose_l, nose_r],
+                                            dtype=_np_sym.int32)], _BLACK)
+                for a, b in segs:
+                    cv2.line(frame, a, b, _WHITE, 3, cv2.LINE_AA)
+                cv2.fillPoly(frame,
+                             [_np_sym.array([nose_tip, nose_l, nose_r],
+                                            dtype=_np_sym.int32)], _WHITE)
 
             # Center pivot dot
             cv2.circle(frame, (cx, cy), 4, _BLACK, -1, cv2.LINE_AA)

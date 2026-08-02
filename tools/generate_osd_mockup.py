@@ -37,6 +37,8 @@ After changing overlay_controller.pyx, re-run this tool and commit the PNG.
 """
 
 import math
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -57,6 +59,69 @@ YELLOW  = (255, 200, 0)
 GRAY    = (180, 180, 180)
 DARK_BG = (0,   0,   0,   155)   # RGBA semi-transparent background
 
+# ---------------------------------------------------------------------------
+# Aircraft SVG polygon (same loader as overlay_controller.pyx)
+# ---------------------------------------------------------------------------
+
+def _load_aircraft_svg(svg_path=None):
+    """Load a0.svg and return normalized polygon [(nx, ny)] or None."""
+    if svg_path is None:
+        svg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                '..', 'cymbal', 'osd', 'a0.svg')
+    try:
+        with open(svg_path) as f:
+            svg = f.read()
+    except Exception:
+        return None
+
+    pm = re.search(r'<path[^>]+>', svg, re.DOTALL)
+    if not pm:
+        return None
+    dm = re.search(r'\sd="([^"]+)"', pm.group(0), re.DOTALL)
+    if not dm:
+        return None
+    path_d = dm.group(1)
+
+    tm = re.search(r'transform="matrix\(([^)]+)\)"', svg)
+    if not tm:
+        return None
+    ta, tb, tc, td, te, tf = [float(v) for v in tm.group(1).split(',')]
+
+    def samp(p0, p1, p2, p3, n=8):
+        pts = []
+        for i in range(n + 1):
+            t = i / n; mt = 1 - t
+            pts.append((
+                mt**3*p0[0] + 3*mt**2*t*p1[0] + 3*mt*t**2*p2[0] + t**3*p3[0],
+                mt**3*p0[1] + 3*mt**2*t*p1[1] + 3*mt*t**2*p2[1] + t**3*p3[1],
+            ))
+        return pts
+
+    toks = re.findall(r'[MLCZz]|[+-]?(?:\d+\.?\d*|\.\d+)', path_d)
+    raw = []; cur = (0.0, 0.0); i = 0; cmd = None
+    while i < len(toks):
+        tk = toks[i]
+        if tk in ('M', 'L', 'C', 'Z', 'z'):
+            cmd = tk; i += 1; continue
+        if cmd == 'M':
+            cur = (float(toks[i]), float(toks[i+1])); raw.append(cur); i += 2
+        elif cmd == 'L':
+            cur = (float(toks[i]), float(toks[i+1])); raw.append(cur); i += 2
+        elif cmd == 'C':
+            p1 = (float(toks[i]),   float(toks[i+1]))
+            p2 = (float(toks[i+2]), float(toks[i+3]))
+            p3 = (float(toks[i+4]), float(toks[i+5]))
+            raw.extend(samp(cur, p1, p2, p3, n=8)[1:]); cur = p3; i += 6
+        else:
+            i += 1
+
+    if not raw:
+        return None
+    tx = [(ta*x + tc*y + te, tb*x + td*y + tf) for x, y in raw]
+    return [((px - 100.0) / 100.0, (py - 100.0) / 100.0) for px, py in tx]
+
+
+_AIRCRAFT_POLYGON = _load_aircraft_svg()
 
 # ---------------------------------------------------------------------------
 # Drawing helpers
@@ -291,36 +356,42 @@ def draw_compass(draw, ccx, ccy, cr, track_deg, cam_yaw,
         return (int(ccx + dx * st + dy * ct2),
                 int(ccy - dx * ct2 + dy * st))
 
-    # Correct geometry (dx=forward, dy=starboard):
-    nose_tip = rot( int(cr * 0.78),  0)
-    nose_l   = rot( int(cr * 0.50), -int(cr * 0.09))
-    nose_r   = rot( int(cr * 0.50),  int(cr * 0.09))
-    fus_top  = rot( int(cr * 0.50),  0)
-    fus_bot  = rot(-int(cr * 0.60),  0)
-    wing_fwd = rot( int(cr * 0.05),  0)
-    wl       = rot(-int(cr * 0.18), -int(cr * 0.70))
-    wr       = rot(-int(cr * 0.18),  int(cr * 0.70))
-    stab_l   = rot(-int(cr * 0.52), -int(cr * 0.25))
-    stab_r   = rot(-int(cr * 0.52),  int(cr * 0.25))
+    # -------------------------------------------------------------------------
+    # Aircraft symbol from SVG (a0.svg) — same _rot and mapping as pyx.
+    # SVG: nx=stbd (right), ny=aft (down), nose at ny≈-1.
+    # Body-frame: dx=fwd=-ny, dy=stbd=nx
+    # -------------------------------------------------------------------------
+    if _AIRCRAFT_POLYGON:
+        pts = []
+        for (nx, ny) in _AIRCRAFT_POLYGON:
+            dx = -ny
+            dy =  nx
+            x = int(ccx + dx * cr * st + dy * cr * ct2)
+            y = int(ccy - dx * cr * ct2 + dy * cr * st)
+            pts.append((x, y))
 
-    segs = [
-        (fus_top, fus_bot),
-        (wing_fwd, wl),
-        (wing_fwd, wr),
-        (stab_l, stab_r),
-    ]
+        # Black outline (shadow), then white fill
+        for i in range(len(pts)):
+            p1 = pts[i]; p2 = pts[(i+1) % len(pts)]
+            draw.line([p1, p2], fill=BLACK, width=4)
+        draw.polygon(pts, fill=WHITE)
+    else:
+        # Geometric fallback
+        segs = [
+            (rot( int(cr*0.50), 0),          rot(-int(cr*0.60), 0)),
+            (rot( int(cr*0.05), 0),          rot(-int(cr*0.18), -int(cr*0.70))),
+            (rot( int(cr*0.05), 0),          rot(-int(cr*0.18),  int(cr*0.70))),
+            (rot(-int(cr*0.52), -int(cr*0.25)), rot(-int(cr*0.52), int(cr*0.25))),
+        ]
+        nose_pts = [rot(int(cr*0.78),0), rot(int(cr*0.50),-int(cr*0.09)), rot(int(cr*0.50),int(cr*0.09))]
+        for a, b in segs:
+            draw.line([a, b], fill=BLACK, width=6)
+        draw.polygon(nose_pts, fill=BLACK)
+        for a, b in segs:
+            draw.line([a, b], fill=WHITE, width=3)
+        draw.polygon(nose_pts, fill=WHITE)
 
-    # Shadow pass (black, thick)
-    for a, b in segs:
-        draw.line([a[0]+1, a[1]+1, b[0]+1, b[1]+1], fill=BLACK, width=6)
-    draw.polygon([nose_tip, nose_l, nose_r], fill=BLACK, outline=BLACK)
-
-    # Fill pass (white, thinner)
-    for a, b in segs:
-        draw.line([a[0], a[1], b[0], b[1]], fill=WHITE, width=3)
-    draw.polygon([nose_tip, nose_l, nose_r], fill=WHITE, outline=WHITE)
-
-    # Center pivot dot
+    # Center pivot dot (drawn over aircraft, under camera arrow)
     draw.ellipse([ccx-5, ccy-5, ccx+5, ccy+5], fill=BLACK)
     draw.ellipse([ccx-4, ccy-4, ccx+4, ccy+4], fill=WHITE)
 
