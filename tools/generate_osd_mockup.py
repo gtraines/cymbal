@@ -183,9 +183,9 @@ def draw_rect_outline(draw, x1, y1, x2, y2, color, width=2):
 
 
 def put_text(draw, x, y, text, font, color):
-    """Draw text with a doubled black shadow offset for video readability."""
-    draw.text((x + 1, y + 1), text, fill=BLACK, font=font)
-    draw.text((x + 1, y + 1), text, fill=BLACK, font=font)  # draw twice = denser shadow
+    """Draw text with a full 8-direction black outline for readability over any background."""
+    for ox, oy in ((-1,-1),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)):
+        draw.text((x + ox, y + oy), text, fill=BLACK, font=font)
     draw.text((x, y), text, fill=color, font=font)
 
 
@@ -234,12 +234,12 @@ def draw_crosshair(draw, cx, cy, arm=36, gap=9):
 
 def draw_heading_tape(draw, cx, y, tape_w, tape_h, heading_deg,
                       fov=30.0, font_sm=None, font_xs=None):
-    """Green scrolling heading tape centered at cx."""
+    """Green scrolling heading tape centered at cx. SYNC: matches overlay_controller.pyx."""
     tape_x = cx - tape_w // 2
     deg_per_px = fov / tape_w
     tick_top = y + 3
-    long_h = max(12, tape_h // 3)
-    short_h = max(6, tape_h // 6)
+    long_h = max(14, tape_h // 3)   # was 12, +15%
+    short_h = max(6,  tape_h // 6)
 
     # Background + border
     draw.rectangle([tape_x, y, tape_x + tape_w, y + tape_h], fill=DARK_BG)
@@ -261,14 +261,14 @@ def draw_heading_tape(draw, cx, y, tape_w, tape_h, heading_deg,
                       fill=BLACK, width=2)
             draw.line([xp, tick_top, xp, tick_top + long_h], fill=GREEN, width=2)
             lbl = f"{nd:03d}"
-            lw = tw(draw, lbl, font_xs)
-            lh2 = th(draw, lbl, font_xs)
+            lw = tw(draw, lbl, font_sm)   # bump to font_sm (+15%)
+            lh2 = th(draw, lbl, font_sm)
             lx = xp - lw // 2
             ly = tick_top + long_h + 2
-            put_text(draw, lx, ly, lbl, font_xs, GREEN)
+            put_text(draw, lx, ly, lbl, font_sm, GREEN)
             card = {0: "N", 90: "E", 180: "S", 270: "W"}.get(nd)
             if card:
-                put_text(draw, xp - lw // 2, ly + lh2 + 2, card, font_xs, GREEN)
+                put_text(draw, xp - lw // 2, ly + lh2 + 2, card, font_sm, GREEN)
         else:
             draw.line([xp + 1, tick_top + 1, xp + 1, tick_top + short_h + 1],
                       fill=BLACK, width=1)
@@ -282,16 +282,16 @@ def draw_heading_tape(draw, cx, y, tape_w, tape_h, heading_deg,
     draw.polygon([(cx, chev_y - 1), (cx - chev_s + 1, chev_y - chev_s + 1),
                   (cx + chev_s - 1, chev_y - chev_s + 1)], fill=GREEN)
 
-    # Heading value box (below tape, larger padding)
+    # Heading value box (font_med for +15%)
     hdg_str = f"{int(heading_deg) % 360:03d}\u00b0"
     bx = draw.textbbox((0, 0), hdg_str, font=font_sm)
-    box_w = bx[2] - bx[0] + 18
-    box_h = bx[3] - bx[1] + 12
+    box_w = bx[2] - bx[0] + 20
+    box_h = bx[3] - bx[1] + 14
     bx1 = cx - box_w // 2
     by1 = y + tape_h + 3
     draw.rectangle([bx1, by1, bx1 + box_w, by1 + box_h], fill=DARK_BG)
     draw_rect_outline(draw, bx1, by1, bx1 + box_w, by1 + box_h, GREEN, 2)
-    put_text(draw, bx1 + 9, by1 + 5, hdg_str, font_sm, GREEN)
+    put_text(draw, bx1 + 10, by1 + 6, hdg_str, font_sm, GREEN)
 
 
 def draw_compass(draw, ccx, ccy, cr, track_deg, cam_yaw,
@@ -320,10 +320,10 @@ def draw_compass(draw, ccx, ccy, cr, track_deg, cam_yaw,
 
     # Cardinal ticks + labels
     for angle, lbl, color, bold in [
-        (0,   "N", YELLOW, True),
-        (90,  "E", GRAY,   False),
-        (180, "S", GRAY,   False),
-        (270, "W", GRAY,   False),
+        (0,   "N", YELLOW, True),   # N larger (+15%: font_med)
+        (90,  "E", GRAY,   True),   # E/S/W also use font_med for +15%
+        (180, "S", GRAY,   True),
+        (270, "W", GRAY,   True),
     ]:
         rad = math.radians(angle)
         ir = cr - 9
@@ -336,8 +336,9 @@ def draw_compass(draw, ccx, ccy, cr, track_deg, cam_yaw,
                    int(ccx + cr * math.sin(rad)), int(ccy - cr * math.cos(rad))],
                   fill=GRAY, width=3)
         font = font_med if bold else font_sm
-        tx = int(ccx + (cr + 14) * math.sin(rad))
-        ty = int(ccy - (cr + 14) * math.cos(rad))
+        # Inside ring: offset (outer_r - 16) keeps labels within the disc
+        tx = int(ccx + (cr - 16) * math.sin(rad))
+        ty = int(ccy - (cr - 16) * math.cos(rad))
         lw2 = tw(draw, lbl, font)
         lh2 = th(draw, lbl, font)
         put_text(draw, tx - lw2 // 2, ty - lh2 // 2, lbl, font, color)
@@ -362,12 +363,14 @@ def draw_compass(draw, ccx, ccy, cr, track_deg, cam_yaw,
     # Body-frame: dx=fwd=-ny, dy=stbd=nx
     # -------------------------------------------------------------------------
     if _AIRCRAFT_POLYGON:
+        # Build screen polygon at 75% of radius (−25%)
+        _ac_r = cr * 0.75
         pts = []
         for (nx, ny) in _AIRCRAFT_POLYGON:
             dx = -ny
             dy =  nx
-            x = int(ccx + dx * cr * st + dy * cr * ct2)
-            y = int(ccy - dx * cr * ct2 + dy * cr * st)
+            x = int(ccx + dx * _ac_r * st + dy * _ac_r * ct2)
+            y = int(ccy - dx * _ac_r * ct2 + dy * _ac_r * st)
             pts.append((x, y))
 
         # Black outline (shadow), then white fill
@@ -451,24 +454,24 @@ def create_osd_mockup(output_path="docs/osd_mockup.png", width=1280, height=720)
     pad = max(7,  int(10 * scale))   # panel padding (was 9)
 
     # -------------------------------------------------------------------------
-    # AIRCRAFT PANEL — top-left (no timestamps here)
+    # AIRCRAFT PANEL — top-left (no timestamps here), all UPPERCASE
     # -------------------------------------------------------------------------
     aircraft_lines = [
         "\u2500\u2500 AIRCRAFT \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
-        "123 Main St, Phoenix AZ",
-        "Lat: 33.44827  Lon: -112.07400",
-        "Alt AGL: 499 ft  GPS Alt: 1476 ft",
-        "GndSpd: 63.8 mph  (True)",
-        "Fix: DGPS  Sats: 12",
+        "123 MAIN ST, PHOENIX AZ",
+        "LAT: 33.44827  LON: -112.07400",
+        "ALT AGL: 499 FT  GPS ALT: 1476 FT",
+        "GNDSPD: 63.8 MPH  (TRUE)",
+        "FIX: DGPS  SATS: 12",
     ]
     draw_aircraft_panel(draw, 12, 12 + lh, aircraft_lines, font_med, lh, pad)
 
     # -------------------------------------------------------------------------
-    # DATETIME PANEL — bottom-left
+    # DATETIME PANEL — bottom-left, UPPERCASE
     # -------------------------------------------------------------------------
     datetime_lines = [
-        "2026-08-01 17:23:45 UTC",
-        "2026-08-01 10:23:45 MST",
+        "2026-08-02 17:23:45 UTC",
+        "2026-08-02 10:23:45 MST",
     ]
     max_dt_w = max(tw(draw, l, font_med) for l in datetime_lines)
     dt_panel_h = len(datetime_lines) * lh + pad * 2
@@ -481,21 +484,21 @@ def create_osd_mockup(output_path="docs/osd_mockup.png", width=1280, height=720)
         ty_dt += lh
 
     # -------------------------------------------------------------------------
-    # HEADING TAPE — top-center
+    # HEADING TAPE — top-center (40% wide, +15% height)
     # -------------------------------------------------------------------------
-    tape_h = max(28, int(height * 0.07))
-    tape_w = max(220, int(width  * 0.30))
+    tape_h = max(32, int(height * 0.08))    # was 0.07, +15%
+    tape_w = max(400, int(width  * 0.40))   # was 0.30, widened to 40%
     tape_y = max(8,   int(height * 0.02))
     tape_cx = width // 2
     draw_heading_tape(draw, tape_cx, tape_y, tape_w, tape_h,
                       heading_deg=135.0, fov=30.0,
-                      font_sm=font_sm, font_xs=font_xs)
+                      font_sm=font_med, font_xs=font_sm)   # bumped up one level for +15%
 
     # -------------------------------------------------------------------------
     # COMPASS WIDGET — top-right (moved inward to avoid clipping)
     # -------------------------------------------------------------------------
-    cr  = max(52, int(min(width, height) * 0.08))   # +10% from 0.07
-    ccx = width - cr - 90      # leave room for labels below
+    cr  = max(52, int(min(width, height) * 0.08))
+    ccx = width - cr - 90
     ccy = cr + 22
     draw_compass(draw, ccx, ccy, cr,
                  track_deg=45.0, cam_yaw=15.0,
@@ -509,14 +512,14 @@ def create_osd_mockup(output_path="docs/osd_mockup.png", width=1280, height=720)
     draw_crosshair(draw, width // 2, height // 2, arm=arm, gap=gap)
 
     # -------------------------------------------------------------------------
-    # TARGET PANEL — bottom-right
+    # TARGET PANEL — bottom-right, UPPERCASE
     # -------------------------------------------------------------------------
     target_lines = [
         "\u2500\u2500 TARGET \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
-        "Lat: 33.39100  Lon: -111.81900",
-        "Elev: 1247 ft MSL",
-        "Slant Range: 2340 ft",
-        "456 W Desert Ave, Mesa AZ",
+        "LAT: 33.39100  LON: -111.81900",
+        "ELEV: 1247 FT MSL",
+        "SLANT RANGE: 2340 FT",
+        "456 W DESERT AVE, MESA AZ",
     ]
     draw_target_panel(draw, width, height, target_lines, font_med, lh, pad)
 

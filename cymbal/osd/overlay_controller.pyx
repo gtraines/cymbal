@@ -173,8 +173,8 @@ cdef class OSDOverlay:
         self.show_compass = True
         self.compass_radius = 45
         self.show_heading_tape = True
-        self.heading_tape_height_pct = 0.07
-        self.heading_tape_width_pct = 0.25
+        self.heading_tape_height_pct = 0.08    # was 0.07, +15%
+        self.heading_tape_width_pct = 0.40     # was 0.25, widened to 40%
         self.heading_tape_fov_deg = 30.0
 
         self._video_sink = None
@@ -428,7 +428,7 @@ cdef class OSDOverlay:
             lines.append(f"SBUS[1-8]:  {row1}")
             lines.append(f"SBUS[9-16]: {row2}")
 
-        return lines
+        return [l.upper() for l in lines]
 
     # Keep _build_lines as an alias for backward compatibility
     def _build_lines(self):
@@ -461,7 +461,7 @@ cdef class OSDOverlay:
         if self.poi_address:
             lines.append(self.poi_address)
 
-        return lines
+        return [l.upper() for l in lines]
 
     cdef void _draw_text_box(self, object frame, list lines, int x, int y,
                              object text_color=None):
@@ -519,11 +519,12 @@ cdef class OSDOverlay:
     cdef void _put_text_shadowed(self, object frame, str text, int x, int y,
                                   double scale, object color, int thickness):
         """
-        Draw text with a 1-pixel black shadow offset to (+1, +1), then draw
-        the text in `color` at (x, y).  This prevents washout over bright video.
+        Draw text with a full 8-direction black outline for maximum readability
+        over any background, then draw the text in `color` on top.
         """
-        cv2.putText(frame, text, (x + 1, y + 1), _FONT, scale,
-                    _BLACK, thickness + 2, cv2.LINE_AA)
+        for _ox, _oy in ((-1,-1),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)):
+            cv2.putText(frame, text, (x + _ox, y + _oy), _FONT, scale,
+                        _BLACK, thickness + 1, cv2.LINE_AA)
         cv2.putText(frame, text, (x, y), _FONT, scale,
                     color, thickness, cv2.LINE_AA)
 
@@ -605,6 +606,8 @@ cdef class OSDOverlay:
             except Exception:
                 pass
 
+        lines = [l.upper() for l in lines]
+
         cdef int lh  = int(30 * self.font_scale)
         cdef int pad = 8
         cdef int panel_height = lh * len(lines) + pad * 2
@@ -677,11 +680,12 @@ cdef class OSDOverlay:
             cv2.line(frame, (ix, iy), (ox, oy), ring_color, 3, cv2.LINE_AA)
 
             lbl = cardinal_labels[i]
-            lscale = 0.60 if i == 0 else 0.42
-            lthick = 2    if i == 0 else 1
+            lscale = 0.69 if i == 0 else 0.48   # +15% from 0.60/0.42
+            lthick = 2
             lcolor = _YELLOW if i == 0 else ring_color
-            tx = int(cx + (outer_r + 12) * s) - 5
-            ty = int(cy - (outer_r + 12) * c) + 5
+            # Position inside the ring so labels don't clip at frame edges
+            tx = int(cx + (outer_r - 16) * s) - 5
+            ty = int(cy - (outer_r - 16) * c) + 5
             self._put_text_shadowed(frame, lbl, tx, ty, lscale, lcolor, lthick)
 
         # Aircraft symbol from SVG (a0.svg), falling back to geometric lines
@@ -698,9 +702,9 @@ cdef class OSDOverlay:
             import numpy as _np_sym
 
             if _AIRCRAFT_POLYGON is not None:
-                # Build screen polygon: SVG nx=stbd, ny=aft (nose at ny=-1)
-                # Body-frame: dx=fwd=-ny, dy=stbd=nx
-                pts = [_rot(int(-ny * radius), int(nx * radius))
+                # Build screen polygon at 75% of radius (−25% from full)
+                _ac_r = int(radius * 0.75)
+                pts = [_rot(int(-ny * _ac_r), int(nx * _ac_r))
                        for nx, ny in _AIRCRAFT_POLYGON]
                 arr = _np_sym.array(pts, dtype=_np_sym.int32)
                 # Black outline shadow, then white fill
@@ -807,8 +811,8 @@ cdef class OSDOverlay:
         cdef int tape_center_x = tape_x + tape_width // 2
 
         cdef int tick_y_top    = tape_y + 3
-        cdef int short_tick_h  = 5
-        cdef int long_tick_h   = 12
+        cdef int short_tick_h  = 6     # was 5, +15%
+        cdef int long_tick_h   = 14    # was 12, +15%
         cdef int tick_y_short  = tick_y_top + short_tick_h
         cdef int tick_y_long   = tick_y_top + long_tick_h
 
@@ -846,20 +850,20 @@ cdef class OSDOverlay:
                 cv2.line(frame, (x_pos, tick_y_top), (x_pos, tick_y_long), _GREEN, 2)
 
                 label_text = f"{normalized_deg:03d}"
-                text_size  = cv2.getTextSize(label_text, _FONT, 0.40, 1)
+                text_size  = cv2.getTextSize(label_text, _FONT, 0.46, 1)  # was 0.40, +15%
                 text_width  = text_size[0][0]
                 text_height = text_size[0][1]
                 text_x = x_pos - text_width // 2
                 text_y = tick_y_long + text_height + 2
                 self._put_text_shadowed(frame, label_text, text_x, text_y,
-                                        0.40, _GREEN, 1)
+                                        0.46, _GREEN, 1)   # was 0.40
 
                 # Cardinal label
                 cardinal = {0: "N", 90: "E", 180: "S", 270: "W"}.get(normalized_deg)
                 if cardinal is not None:
                     self._put_text_shadowed(frame, cardinal,
                                             x_pos - 4, text_y + 14,
-                                            0.45, _GREEN, 2)
+                                            0.52, _GREEN, 2)  # was 0.45
             else:
                 cv2.line(frame, (x_pos + 1, tick_y_top + 1), (x_pos + 1, tick_y_short + 1),
                          _BLACK, 1)
@@ -887,9 +891,9 @@ cdef class OSDOverlay:
 
         # Heading value box — wider/taller so the degree symbol fits
         cdef str heading_str = f"{int(camera_heading_deg) % 360:03d}\u00b0"
-        text_size  = cv2.getTextSize(heading_str, _FONT, 0.50, 2)
-        cdef int box_w = text_size[0][0] + 16
-        cdef int box_h = text_size[0][1] + 10
+        text_size  = cv2.getTextSize(heading_str, _FONT, 0.58, 2)  # was 0.50, +15%
+        cdef int box_w = text_size[0][0] + 18
+        cdef int box_h = text_size[0][1] + 12
         cdef int box_x = tape_center_x - box_w // 2
         cdef int box_y = tape_y + tape_height + 2
 
@@ -903,8 +907,8 @@ cdef class OSDOverlay:
                       (box_x + box_w + 1, box_y + box_h + 1), _BLACK, 3)
         cv2.rectangle(frame, (box_x, box_y), (box_x + box_w, box_y + box_h), _GREEN, 2)
         self._put_text_shadowed(frame, heading_str,
-                                box_x + 8, box_y + box_h - 4,
-                                0.50, _GREEN, 2)
+                                box_x + 9, box_y + box_h - 4,
+                                0.58, _GREEN, 2)  # was 0.50
 
     cpdef void close(self):
         """Release OSD resources and close the attached video sink."""

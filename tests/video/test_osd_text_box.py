@@ -83,13 +83,13 @@ class TestOSDTextBoxLines(unittest.TestCase):
         osd = self._osd()
         fill_telemetry(osd, address="1234 E Main St, Mesa, AZ 85201")
         lines = osd._build_aircraft_lines()
-        self.assertIn("1234 E Main St", lines[1])
+        self.assertIn("1234 E MAIN ST", lines[1])
 
     def test_unknown_address_fallback(self):
         osd = self._osd()
         fill_telemetry(osd, address="")
         lines = osd._build_aircraft_lines()
-        self.assertEqual(lines[1], "Unknown address")
+        self.assertEqual(lines[1], "UNKNOWN ADDRESS")
 
     # ------------------------------------------------------------------
     # GPS position row (index 2)
@@ -107,7 +107,7 @@ class TestOSDTextBoxLines(unittest.TestCase):
         osd = self._osd()
         fill_telemetry(osd, lat=float('nan'), lon=float('nan'))
         lines = osd._build_aircraft_lines()
-        self.assertIn("No fix", lines[2])
+        self.assertIn("NO FIX", lines[2])
 
     # ------------------------------------------------------------------
     # Altitude AGL row — Imperial (feet) (index 3)
@@ -119,8 +119,8 @@ class TestOSDTextBoxLines(unittest.TestCase):
         lines = osd._build_aircraft_lines()
         expected_ft = f"{152.3 * _M_TO_FT:.0f}"
         self.assertIn(expected_ft, lines[3])
-        self.assertIn("ft", lines[3])
-        self.assertNotIn(" m", lines[3])
+        self.assertIn("FT", lines[3])
+        self.assertNotIn(" M", lines[3])
 
     def test_alt_msl_row_in_feet(self):
         osd = self._osd()
@@ -145,14 +145,14 @@ class TestOSDTextBoxLines(unittest.TestCase):
         lines = osd._build_aircraft_lines()
         expected_mph = f"{28.4 * _MS_TO_MPH:.1f}"
         self.assertIn(expected_mph, lines[4])
-        self.assertIn("mph", lines[4])
-        self.assertNotIn("m/s", lines[4])
+        self.assertIn("MPH", lines[4])
+        self.assertNotIn("M/S", lines[4])
 
     def test_groundspeed_row_has_true_label(self):
         osd = self._osd()
         fill_telemetry(osd, groundspeed=20.0)
         lines = osd._build_aircraft_lines()
-        self.assertIn("True", lines[4])
+        self.assertIn("TRUE", lines[4])
 
     def test_groundspeed_row_missing(self):
         osd = self._osd()
@@ -181,7 +181,7 @@ class TestOSDTextBoxLines(unittest.TestCase):
         osd = self._osd()
         fill_telemetry(osd, fix_quality=0, satellites=0)
         lines = osd._build_aircraft_lines()
-        self.assertIn("No fix", lines[5])
+        self.assertIn("NO FIX", lines[5])
 
     # ------------------------------------------------------------------
     # SBUS channel rows (optional)

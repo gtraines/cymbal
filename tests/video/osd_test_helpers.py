@@ -221,7 +221,7 @@ class OSDOverlay:
             lines.append(f"SBUS[1-8]:  {row1}")
             lines.append(f"SBUS[9-16]: {row2}")
 
-        return lines
+        return [l.upper() for l in lines]
 
     def _build_target_lines(self):
         """Assemble the target panel text lines (Imperial units for display)."""
@@ -250,7 +250,7 @@ class OSDOverlay:
         if self.poi_address:
             lines.append(self.poi_address)
 
-        return lines
+        return [l.upper() for l in lines]
 
     # Keep _build_lines as an alias for backward compatibility
     def _build_lines(self):
@@ -270,7 +270,7 @@ class OSDOverlay:
                 lines.append(local_dt.strftime(f"%Y-%m-%d %H:%M:%S {tz_abbr}"))
             except Exception:
                 pass
-        return lines
+        return [l.upper() for l in lines]
 
     def close(self):
         if self._video_sink is not None:

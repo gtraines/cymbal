@@ -43,7 +43,7 @@ class TestOSDRenderPipeline(unittest.TestCase):
         osd.render_frame(frame)
         self.assertIn('lines', frame)
         lines = frame['lines']
-        self.assertTrue(any("Test Address" in l for l in lines))
+        self.assertTrue(any("TEST ADDRESS" in l for l in lines))
 
     def test_render_frame_skips_none_frame(self):
         osd, sink = make_osd(time_fn=fixed_time())
@@ -104,7 +104,7 @@ class TestOSDRenderPipeline(unittest.TestCase):
         frame = {}
         osd.render_frame(frame)
         self.assertTrue(
-            any("321 W Broadway" in l for l in frame.get('lines', [])),
+            any("321 W BROADWAY" in l for l in frame.get('lines', [])),
             f"lines={frame.get('lines')}"
         )
 
@@ -126,8 +126,8 @@ class TestOSDRenderPipeline(unittest.TestCase):
         osd.render_frame(frame)
         lines = frame.get('lines', [])
         self.assertTrue(
-            any("No fix" in l for l in lines),
-            f"Expected 'No fix' in lines: {lines}"
+            any("NO FIX" in l for l in lines),
+            f"Expected 'NO FIX' in lines: {lines}"
         )
 
     def test_injected_timestamp_in_rendered_frame(self):
